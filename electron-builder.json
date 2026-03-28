@@ -1,0 +1,26 @@
+{
+  "appId": "com.opencowork.app",
+  "productName": "OpenCowork",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "main": "dist/main/index.js"
+  },
+  "mac": {
+    "target": ["dmg"],
+    "category": "public.app-category.productivity"
+  },
+  "linux": {
+    "target": ["AppImage"],
+    "category": "Utility"
+  },
+  "windows": {
+    "target": ["nsis"]
+  }
+}

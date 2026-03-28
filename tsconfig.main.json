@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "outDir": "dist/main",
+    "rootDir": "src",
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": [
+    "src/main/**/*",
+    "src/core/**/*",
+    "src/config/**/*",
+    "src/preview/**/*",
+    "src/llm/**/*"
+  ],
+  "exclude": ["node_modules", "src/renderer/**/*"]
+}

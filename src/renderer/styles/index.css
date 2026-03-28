@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #6366F1;
+  --color-primary-hover: #5558E3;
+  --color-secondary: #8B5CF6;
+  --color-accent: #22D3EE;
+  --color-bg: #0F0F14;
+  --color-surface: #1A1A24;
+  --color-elevated: #252532;
+  --color-border: #2E2E3A;
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #A1A1AA;
+  --color-text-muted: #71717A;
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-error: #EF4444;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-elevated);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border);
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Button base styles */
+.btn {
+  @apply px-4 py-2 rounded-md font-medium transition-colors duration-150;
+}
+
+.btn-primary {
+  @apply bg-primary hover:bg-primary-hover text-white;
+}
+
+.btn-secondary {
+  @apply bg-elevated hover:bg-border text-white;
+}
+
+.btn-danger {
+  @apply bg-error hover:bg-red-600 text-white;
+}
+
+/* Input styles */
+.input {
+  @apply w-full px-4 py-3 bg-white/5 border border-border rounded-md;
+  @apply text-white placeholder-text-muted;
+  @apply focus:border-primary focus:ring-1 focus:ring-primary;
+  @apply transition-colors duration-150;
+}
+
+/* Card styles */
+.card {
+  @apply bg-surface rounded-lg border border-border;
+  @apply shadow-sm;
+}
+
+/* Message bubbles */
+.message-user {
+  @apply bg-primary rounded-2xl px-4 py-3 max-w-[70%] ml-auto;
+}
+
+.message-ai {
+  @apply bg-surface rounded-2xl px-4 py-3 max-w-[80%] mr-auto border border-border;
+}
+
+/* Status indicators */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-dot-success {
+  @apply bg-success;
+}
+
+.status-dot-warning {
+  @apply bg-warning;
+}
+
+.status-dot-error {
+  @apply bg-error;
+}
+
+.status-dot-pending {
+  @apply bg-text-muted animate-pulse;
+}
+
+/* Progress bar */
+.progress-bar {
+  @apply h-2 bg-elevated rounded-full overflow-hidden;
+}
+
+.progress-bar-fill {
+  @apply h-full bg-primary rounded-full transition-all duration-300;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/70 flex items-center justify-center z-50;
+}
+
+.modal-content {
+  @apply bg-surface rounded-lg p-6 max-w-md w-full mx-4 shadow-lg;
+}
+
+/* Tooltip */
+.tooltip {
+  @apply absolute z-50 px-2 py-1 text-sm bg-elevated rounded shadow-md;
+}

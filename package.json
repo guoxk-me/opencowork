@@ -1,0 +1,79 @@
+{
+  "name": "opencowork",
+  "version": "0.1.0",
+  "description": "AI Native Desktop Agent - OpenCowork",
+  "main": "dist/main/main/index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:preload": "tsc -p tsconfig.preload.json",
+    "build:renderer": "vite build",
+    "electron:dev": "npm run build:main && npm run build:preload && npm run build:renderer && electron .",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "prepare": "npm run build:main && npm run build:preload"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "desktop",
+    "electron",
+    "browser-automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright-extra": "^4.3.6",
+    "playwright-stealth": "^0.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.7"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^14.3.1",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.34.3",
+    "jsdom": "^24.1.0",
+    "playwright": "^1.44.1",
+    "postcss": "^8.4.38",
+    "prettier": "^3.3.2",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1",
+    "vitest": "^1.6.0"
+  },
+  "build": {
+    "appId": "com.opencowork.app",
+    "productName": "OpenCowork",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "windows": {
+      "target": "nsis"
+    }
+  }
+}
