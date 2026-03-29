@@ -5,6 +5,16 @@ export interface Message {
   role: 'user' | 'ai';
   content: string;
   timestamp: number;
+  steps?: AgentStep[];
+}
+
+export interface AgentStep {
+  id: string;
+  toolName: string;
+  args: any;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  result?: any;
+  duration?: number;
 }
 
 export interface Task {
@@ -52,6 +62,12 @@ interface TaskState {
   updateTaskStatus: (status: Task['status']) => void;
   updateCurrentStep: (step: string) => void;
   setTaskError: (error: string) => void;
+
+  // Active Steps (for real-time step display)
+  activeSteps: AgentStep[];
+  addActiveStep: (step: AgentStep) => void;
+  updateActiveStep: (id: string, updates: Partial<AgentStep>) => void;
+  clearActiveSteps: () => void;
 
   // Task Logs
   logs: TaskLog[];
@@ -116,6 +132,18 @@ export const useTaskStore = create<TaskState>((set) => ({
     set((state) => ({
       task: state.task ? { ...state.task, error } : null,
     })),
+
+  // Active Steps
+  activeSteps: [],
+  addActiveStep: (step) =>
+    set((state) => ({
+      activeSteps: [...state.activeSteps, step],
+    })),
+  updateActiveStep: (id, updates) =>
+    set((state) => ({
+      activeSteps: state.activeSteps.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+    })),
+  clearActiveSteps: () => set({ activeSteps: [] }),
 
   // Task Logs
   logs: [],

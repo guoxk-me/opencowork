@@ -22,6 +22,9 @@ function App() {
     previewMode,
     setPreviewMode,
     messages,
+    addActiveStep,
+    updateActiveStep,
+    clearActiveSteps,
   } = useTaskStore();
   const { saveMessages } = useSessionStore();
   const [screenshot, setScreenshot] = useState<string | null>(null);
@@ -40,9 +43,19 @@ function App() {
       window.electron.on('task:nodeStart', (event: any) => {
         console.log('[Renderer] Received task:nodeStart', event);
         const node = event.node;
-        if (node?.metadata?.description) {
-          updateCurrentStep(node.metadata.description);
-          addLog({ type: 'step', message: `执行步骤: ${node.metadata.description}` });
+        if (node?.action) {
+          const stepId = node.id || `step-${Date.now()}`;
+          const action = node.action;
+          addActiveStep({
+            id: stepId,
+            toolName: action.type || 'unknown',
+            args: action.params || {},
+            status: 'running',
+          });
+          updateCurrentStep(
+            `${action.type}: ${action.params ? JSON.stringify(action.params).substring(0, 50) : ''}`
+          );
+          addLog({ type: 'step', message: `执行步骤: ${action.type}` });
         }
       })
     );
@@ -51,8 +64,14 @@ function App() {
       window.electron.on('task:nodeComplete', (event: any) => {
         console.log('[Renderer] Received task:nodeComplete', event);
         const node = event.node;
-        if (node?.metadata?.description) {
-          addLog({ type: 'success', message: `完成: ${node.metadata.description}` });
+        if (node?.id) {
+          const isError = node.result?.error || node.result?.success === false;
+          updateActiveStep(node.id, {
+            status: isError ? 'error' : 'completed',
+            result: node.result,
+            duration: node.duration,
+          });
+          addLog({ type: 'success', message: `完成: ${node.action?.type || '步骤'}` });
         }
       })
     );
@@ -60,23 +79,23 @@ function App() {
     unsubscribers.push(
       window.electron.on('task:completed', (event: any) => {
         console.log('[Renderer] Received task:completed', event);
-        console.log('[Renderer] Current task before update:', useTaskStore.getState().task);
+        console.log('[Renderer] event.result:', JSON.stringify(event.result).substring(0, 500));
         updateTaskStatus('completed');
-        console.log('[Renderer] Task after update:', useTaskStore.getState().task);
-        let resultText = '';
-        if (event.result) {
-          if (event.result.formatted) {
-            resultText = `\n\n${event.result.formatted}`;
-          } else if (event.result.content) {
-            resultText = `\n\n${event.result.content}`;
-          } else {
-            resultText = ` 结果: ${JSON.stringify(event.result)}`;
-          }
-        }
+
+        const { activeSteps } = useTaskStore.getState();
+        const innerResult = event.result?.result || event.result || event.data || {};
+        const resultText = innerResult.finalMessage || '任务已完成';
+        console.log('[Renderer] finalMessage:', resultText);
+        const steps = Array.isArray(innerResult.steps) ? innerResult.steps : [];
+
+        const finalSteps =
+          activeSteps.length > 0 ? activeSteps : steps.length > 0 ? steps : undefined;
         addMessage({
           role: 'ai',
-          content: '任务已完成！' + resultText,
+          content: resultText,
+          steps: finalSteps,
         });
+        clearActiveSteps();
         addLog({ type: 'success', message: '任务执行完成' });
         saveMessages(useTaskStore.getState().messages);
       })
@@ -88,6 +107,7 @@ function App() {
         const errorMsg = event.error?.message || event.error || '未知错误';
         setTaskError(errorMsg);
         updateTaskStatus('failed');
+        clearActiveSteps();
         addMessage({
           role: 'ai',
           content: `任务执行失败: ${errorMsg}`,

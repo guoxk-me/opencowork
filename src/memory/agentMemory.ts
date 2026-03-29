@@ -21,19 +21,49 @@ export class AgentMemory {
   }
 
   async put(entry: MemoryEntry): Promise<void> {
-    const key = `${entry.type}_${entry.id}`;
+    const key = `${this.namespace}_${entry.type}_${entry.id}`;
     this.entries.set(key, entry);
     console.log(`[AgentMemory] Stored: ${key}`);
   }
 
-  async get(id: string): Promise<MemoryEntry | null> {
-    const entry = this.entries.get(id);
-    return entry || null;
+  async get(id: string, type?: MemoryEntry['type']): Promise<MemoryEntry | null> {
+    if (type) {
+      const key = `${this.namespace}_${type}_${id}`;
+      return this.entries.get(key) || null;
+    }
+    for (const [key, entry] of this.entries) {
+      if (entry.id === id) {
+        return entry;
+      }
+    }
+    return null;
   }
 
-  async delete(id: string): Promise<void> {
-    this.entries.delete(id);
-    console.log(`[AgentMemory] Deleted: ${id}`);
+  async getByType(type: MemoryEntry['type']): Promise<MemoryEntry[]> {
+    const results: MemoryEntry[] = [];
+    const prefix = `${this.namespace}_${type}_`;
+    for (const [key, entry] of this.entries) {
+      if (key.startsWith(prefix)) {
+        results.push(entry);
+      }
+    }
+    return results;
+  }
+
+  async delete(id: string, type?: MemoryEntry['type']): Promise<void> {
+    if (type) {
+      const key = `${this.namespace}_${type}_${id}`;
+      this.entries.delete(key);
+      console.log(`[AgentMemory] Deleted: ${key}`);
+    } else {
+      for (const [key, entry] of this.entries) {
+        if (entry.id === id) {
+          this.entries.delete(key);
+          console.log(`[AgentMemory] Deleted: ${key}`);
+          return;
+        }
+      }
+    }
   }
 
   async list(): Promise<MemoryEntry[]> {

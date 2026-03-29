@@ -273,4 +273,17 @@ git rebase origin/main
 
 ---
 
-Last updated: 2026-03-29
+## Documentation
+
+### Docs Directory
+
+Documentation files are located in: `/home/gaohaining/opencowork/docs/`
+
+Key documents:
+
+- `PRD.md` - Product Requirements Document
+- `SPEC_v0.4.md` - Technical Specification v0.4
+- `USER_GUIDE.md` - User Guide
+- `CHANGELOG.md` - Changelog
+
+Last updated: 2026-03-30

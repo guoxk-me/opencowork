@@ -1,17 +1,59 @@
 import React from 'react';
-import { Message } from '../stores/taskStore';
+import { Message, AgentStep } from '../stores/taskStore';
 
 interface ChatMessageProps {
   message: Message;
 }
+
+const StepIcon = ({ status }: { status: AgentStep['status'] }) => {
+  switch (status) {
+    case 'pending':
+      return <span className="step-icon text-gray-400">⏳</span>;
+    case 'running':
+      return <span className="step-icon animate-spin">🔄</span>;
+    case 'completed':
+      return <span className="step-icon text-green-400">✅</span>;
+    case 'error':
+      return <span className="step-icon text-red-400">❌</span>;
+    default:
+      return <span className="step-icon text-gray-400">⚪</span>;
+  }
+};
+
+const formatArgs = (args: any): string => {
+  if (!args) return '';
+  if (args.url) return args.url;
+  if (args.selector) return `点击: ${args.selector}`;
+  if (args.command) return `执行: ${args.command}`;
+  return JSON.stringify(args).substring(0, 50);
+};
 
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user';
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`${isUser ? 'message-user' : 'message-ai'}`}>
+      <div className={`${isUser ? 'message-user' : 'message-ai'} max-w-[80%] flex flex-col gap-2`}>
         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+
+        {message.steps && message.steps.length > 0 && (
+          <div className="steps-list mt-2 pl-2 border-l-2 border-gray-600">
+            {message.steps.map((step, index) => (
+              <div
+                key={step.id || index}
+                className="step-item flex items-center gap-2 py-1 text-xs"
+              >
+                <StepIcon status={step.status} />
+                <span className="step-tool text-blue-400 font-medium">{step.toolName}:</span>
+                <span className="step-args text-gray-300">{formatArgs(step.args)}</span>
+                {step.duration && (
+                  <span className="step-duration text-gray-500 ml-2">({step.duration}ms)</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         <span className="text-xs text-white/50 mt-1 block">
           {new Date(message.timestamp).toLocaleTimeString()}
         </span>

@@ -5,12 +5,16 @@ import { sessionManager } from './SessionManager';
 import { BrowserExecutor } from '../core/executor/BrowserExecutor';
 import { CLIExecutor } from '../core/executor/CLIExecutor';
 import { ActionType } from '../core/action/ActionSchema';
+import { createMainAgent, MainAgent } from '../agents/mainAgent';
 
 const taskEngine = new TaskEngine();
 const previewManager = new PreviewManager();
 
 let browserExecutor: BrowserExecutor | null = null;
 let cliExecutor: CLIExecutor | null = null;
+let sharedMainAgent: MainAgent | null = null;
+let sharedThreadId: string = 'main-session';
+let isAgentInitializing: boolean = false;
 
 function getBrowserExecutor(): BrowserExecutor {
   if (!browserExecutor) {
@@ -25,6 +29,8 @@ function getCLIExecutor(): CLIExecutor {
   }
   return cliExecutor;
 }
+
+export { getBrowserExecutor, getCLIExecutor };
 
 // Set main window reference
 export function setTaskEngineMainWindow(window: BrowserWindow | null): void {
@@ -53,45 +59,107 @@ type IpcHandler = (
 ) => Promise<any>;
 
 export const IPC_HANDLERS: Record<string, IpcHandler> = {
-  // 任务相关
-  'task:start': async (mainWindow, previewWindow, { task }) => {
-    if (taskEngine.isTaskRunning()) {
-      return { success: false, error: '已有任务正在执行中，请等待完成后再发起新任务' };
+  // 任务相关 (v0.4 - 使用 MainAgent)
+  'task:start': async (mainWindow, previewWindow, { task, threadId }) => {
+    console.log('[IPC] task:start:', task, 'threadId:', threadId);
+
+    try {
+      if (!sharedMainAgent && !isAgentInitializing) {
+        isAgentInitializing = true;
+        console.log('[IPC] Creating shared MainAgent...');
+        sharedMainAgent = await createMainAgent({
+          logger: { level: 'debug', output: 'console' },
+        });
+        sharedMainAgent.setMainWindow(mainWindow);
+        sharedMainAgent.setPreviewWindow(previewWindow);
+        isAgentInitializing = false;
+        console.log('[IPC] Shared MainAgent created, threadId:', sharedMainAgent.getThreadId());
+      } else if (isAgentInitializing) {
+        console.log('[IPC] Agent is still initializing, waiting...');
+        while (isAgentInitializing) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+
+      const agent = sharedMainAgent!;
+      if (threadId) {
+        agent.setThreadId(threadId);
+        sharedThreadId = threadId;
+      } else {
+        agent.setThreadId(sharedThreadId);
+      }
+
+      const handleId = agent.getThreadId();
+      console.log('[IPC] Starting MainAgent, handleId:', handleId);
+
+      const result = await agent.run(task);
+
+      console.log('[IPC] MainAgent completed, result:', result.success);
+
+      return {
+        success: result.success,
+        handle: handleId,
+        output: result.output,
+        error: result.error,
+        duration: result.duration,
+      };
+    } catch (error: any) {
+      console.error('[IPC] task:start error:', error);
+      isAgentInitializing = false;
+
+      return {
+        success: false,
+        error: error.message || 'Agent execution failed',
+      };
     }
-    const handle = await taskEngine.startTask(task, mainWindow ?? undefined);
-    return { handle };
   },
 
   'task:pause': async (mainWindow, previewWindow, { handleId }) => {
+    if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
+      sharedMainAgent.pause();
+      return { success: true };
+    }
     await taskEngine.pause(handleId);
     return { success: true };
   },
 
   'task:resume': async (mainWindow, previewWindow, { handleId }) => {
+    if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
+      sharedMainAgent.resume();
+      return { success: true };
+    }
     await taskEngine.resume(handleId);
     return { success: true };
   },
 
   'task:stop': async (mainWindow, previewWindow, { handleId }) => {
-    await taskEngine.stop(handleId);
+    if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
+      sharedMainAgent.requestCancel();
+      return { success: true };
+    }
+    await taskEngine.cancel(handleId);
     return { success: true };
   },
 
   'task:status': async (mainWindow, previewWindow, { handleId }) => {
-    const status = taskEngine.getStatus(handleId);
+    if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
+      const status = sharedMainAgent.getStatus();
+      return { status, handleId };
+    }
+    const status = taskEngine.getState(handleId);
     return { status };
   },
 
   // 浏览器控制
   'browser:launch': async (mainWindow, previewWindow) => {
     const executor = getBrowserExecutor();
-    await executor.ensureBrowser();
+    await executor.launchBrowser();
     return { success: true };
   },
 
   'browser:close': async (mainWindow, previewWindow) => {
     const executor = getBrowserExecutor();
-    await executor.close();
+    await executor.closeBrowser();
     return { success: true };
   },
 
@@ -131,7 +199,7 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     return { session };
   },
 
-  // Agent 相关 (v0.4)
+  // Agent 相关 (v0.4) - MainAgent 直接调用
   'agent:browser': async (mainWindow, previewWindow, params) => {
     console.log('[IPC] agent:browser:', params);
     try {
@@ -142,25 +210,62 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
       switch (action.action) {
         case 'navigate':
         case 'goto':
-          result = await executor.execute({ type: ActionType.BROWSER_NAVIGATE, params: { url: action.url, waitUntil: 'domcontentloaded' }, id: '', description: '' });
+          result = await executor.execute({
+            id: `ipc-nav-${Date.now()}`,
+            type: ActionType.BROWSER_NAVIGATE,
+            description: 'IPC Navigate',
+            params: { url: action.url, waitUntil: 'domcontentloaded' },
+          });
           break;
         case 'click':
-          result = await executor.execute({ type: ActionType.BROWSER_CLICK, params: { selector: action.selector, index: action.index }, id: '', description: '' });
+          result = await executor.execute({
+            id: `ipc-click-${Date.now()}`,
+            type: ActionType.BROWSER_CLICK,
+            description: 'IPC Click',
+            params: { selector: action.selector, index: action.index },
+          });
           break;
         case 'input':
-          result = await executor.execute({ type: ActionType.BROWSER_INPUT, params: { selector: action.selector, text: action.text, clear: true }, id: '', description: '' });
+          result = await executor.execute({
+            id: `ipc-input-${Date.now()}`,
+            type: ActionType.BROWSER_INPUT,
+            description: 'IPC Input',
+            params: { selector: action.selector, text: action.text, clear: true },
+          });
           break;
         case 'wait':
-          result = await executor.execute({ type: ActionType.BROWSER_WAIT, params: { selector: action.selector, timeout: action.timeout || 10000 }, id: '', description: '' });
+          result = await executor.execute({
+            id: `ipc-wait-${Date.now()}`,
+            type: ActionType.BROWSER_WAIT,
+            description: 'IPC Wait',
+            params: { selector: action.selector, timeout: action.timeout || 10000 },
+          });
           break;
         case 'extract':
-          result = await executor.execute({ type: ActionType.BROWSER_EXTRACT, params: { selector: action.selector, type: 'text', multiple: action.multiple !== false }, id: '', description: '' });
+          result = await executor.execute({
+            id: `ipc-extract-${Date.now()}`,
+            type: ActionType.BROWSER_EXTRACT,
+            description: 'IPC Extract',
+            params: {
+              selector: action.selector,
+              type: 'text',
+              multiple: action.multiple !== false,
+            },
+          });
           break;
         case 'screenshot':
-          result = await executor.execute({ type: ActionType.BROWSER_SCREENSHOT, params: {}, id: '', description: '' });
+          result = await executor.execute({
+            id: `ipc-screenshot-${Date.now()}`,
+            type: ActionType.BROWSER_SCREENSHOT,
+            description: 'IPC Screenshot',
+            params: {},
+          });
           break;
         default:
-          return { success: false, error: { code: 'UNKNOWN_ACTION', message: `Unknown action: ${action.action}` } };
+          return {
+            success: false,
+            error: { code: 'UNKNOWN_ACTION', message: `Unknown action: ${action.action}` },
+          };
       }
 
       return result;
@@ -174,35 +279,15 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     console.log('[IPC] agent:cli:', params);
     try {
       const executor = getCLIExecutor();
-      const action = { type: ActionType.CLI_EXECUTE, params: { command: params.command, args: params.args }, id: '', description: '' };
-      const result = await executor.execute(action);
-      return result;
-    } catch (error: any) {
-      console.error('[IPC] agent:cli error:', error);
-      return { success: false, error: { code: 'CLI_ERROR', message: error.message } };
-    }
-  },
-
-  'agent:vision': async (mainWindow, previewWindow, params) => {
-    console.log('[IPC] agent:vision:', params);
-    return { success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Vision executor not yet implemented' } };
-  },
-};
-      }
-    } catch (error: any) {
-      console.error('[IPC] agent:browser error:', error);
-      return { success: false, error: { code: 'BROWSER_ERROR', message: error.message } };
-    }
-  },
-
-  'agent:cli': async (mainWindow, previewWindow, params) => {
-    console.log('[IPC] agent:cli:', params);
-    try {
-      const executor = getCLIExecutor();
-      const result = await executor.execute({
-        type: 'cli:execute',
-        params: { command: params.command, args: params.args },
-      });
+      const action = {
+        id: `cli-${Date.now()}`,
+        type: ActionType.CLI_EXECUTE,
+        description: `Execute CLI: ${params.command}`,
+        params: {
+          command: params.command,
+        },
+      };
+      const result = await executor.execute(action as any);
       return result;
     } catch (error: any) {
       console.error('[IPC] agent:cli error:', error);

@@ -36,9 +36,13 @@ export interface AgentIpcBridgeOptions {
   timeout?: number;
 }
 
+export interface IpcBridgeInterface {
+  invoke(channel: string, ...args: any[]): Promise<any>;
+}
+
 export class AgentIpcBridge {
   private timeout: number;
-  private ipcRenderer: any;
+  private ipcRenderer: IpcBridgeInterface | null = null;
 
   constructor(options: AgentIpcBridgeOptions = {}) {
     this.timeout = options.timeout || 30000;
@@ -129,12 +133,21 @@ export class AgentIpcBridge {
 }
 
 let bridgeInstance: AgentIpcBridge | null = null;
+let bridgeOptions: AgentIpcBridgeOptions | null = null;
 
 export function getAgentIpcBridge(options?: AgentIpcBridgeOptions): AgentIpcBridge {
-  if (!bridgeInstance) {
-    bridgeInstance = new AgentIpcBridge(options);
+  if (!bridgeInstance || (options && JSON.stringify(options) !== JSON.stringify(bridgeOptions))) {
+    if (options) {
+      bridgeOptions = options;
+    }
+    bridgeInstance = new AgentIpcBridge(bridgeOptions || undefined);
   }
   return bridgeInstance;
+}
+
+export function resetAgentIpcBridge(): void {
+  bridgeInstance = null;
+  bridgeOptions = null;
 }
 
 export function createAgentIpcBridge(options?: AgentIpcBridgeOptions): AgentIpcBridge {

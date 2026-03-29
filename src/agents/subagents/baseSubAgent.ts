@@ -60,7 +60,7 @@ export abstract class BaseSubAgent {
     );
   }
 
-  protected abstract getSchema(): z.ZodType<any>;
+  protected abstract getSchema(): z.ZodObject<z.ZodRawShape>;
 
   getName(): string {
     return this.config.name;

@@ -47,6 +47,14 @@ export class BrowserExecutor {
     });
   }
 
+  async launchBrowser(): Promise<void> {
+    await this.ensureBrowser();
+  }
+
+  async closeBrowser(): Promise<void> {
+    await this.cleanup();
+  }
+
   async execute(action: AnyAction): Promise<ActionResult> {
     const startTime = Date.now();
 

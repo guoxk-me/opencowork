@@ -1,6 +1,5 @@
 import { AnyAction, ActionResult, CLIExecuteAction } from '../action/ActionSchema';
 import { exec } from 'child_process';
-import * as path from 'path';
 
 const CLI_WHITELIST: Record<string, string[]> = {
   git: ['status', 'pull', 'push', 'clone', 'log', 'diff', 'branch', 'checkout', 'fetch'],
@@ -19,15 +18,7 @@ const CLI_WHITELIST: Record<string, string[]> = {
   touch: ['*'],
 };
 
-const BLACKLIST_COMMANDS = [
-  'rm -rf',
-  'dd',
-  'mkfs',
-  ':(){:|:&};:',
-  'chmod -R 777',
-  'sudo',
-  'su',
-];
+const BLACKLIST_COMMANDS = ['rm -rf', 'dd', 'mkfs', ':(){:|:&};:', 'chmod -R 777', 'sudo', 'su'];
 
 export class CLIExecutor {
   async execute(action: AnyAction): Promise<ActionResult> {
@@ -107,11 +98,11 @@ export class CLIExecutor {
           return;
         }
 
-      console.log(`[CLIExecutor] Command succeeded`);
+        console.log(`[CLIExecutor] Command succeeded`);
 
-      resolve({
-        success: true,
-        output: stdout.toString(),
+        resolve({
+          success: true,
+          output: stdout.toString(),
           duration: Date.now() - startTime,
         });
       });

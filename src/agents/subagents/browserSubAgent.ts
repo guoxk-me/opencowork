@@ -76,7 +76,7 @@ export class BrowserSubAgent extends BaseSubAgent {
     this.ipcBridge = bridge;
   }
 
-  protected getSchema(): z.ZodType<any> {
+  protected getSchema(): z.ZodObject<z.ZodRawShape> {
     return BrowserParamsSchema;
   }
 
