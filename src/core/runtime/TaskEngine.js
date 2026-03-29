@@ -3,6 +3,10 @@ import { PlanExecutor } from '../planner/PlanExecutor';
 import { TakeoverManager } from './TakeoverManager';
 import { Replanner, ReplanTrigger } from '../planner/Replanner';
 import { generateId } from '../action/ActionSchema';
+import { Observer } from '../../browser/observer';
+import { Verifier } from '../../executor/verifier';
+import { RecoveryEngine, RecoveryStrategy, } from '../../recovery/recoveryEngine';
+import { ShortTermMemory } from '../../memory/shortTermMemory';
 export var TaskStatus;
 (function (TaskStatus) {
     TaskStatus["IDLE"] = "idle";
@@ -23,11 +27,18 @@ export class TaskEngine {
     mainWindow = null;
     previewWindow = null;
     currentTaskId = null;
+    lastCompletedTaskId = null;
+    observer = null;
+    verifier = null;
+    recoveryEngine = null;
+    memory;
+    agentModulesInitialized = false;
     constructor() {
         this.planner = new TaskPlanner();
         this.executor = new PlanExecutor();
         this.replanner = new Replanner();
         this._takeoverManager = new TakeoverManager();
+        this.memory = new ShortTermMemory();
     }
     setMainWindow(window) {
         this.mainWindow = window;
@@ -45,7 +56,9 @@ export class TaskEngine {
         // 检查是否有任务正在执行
         if (this.currentTaskId && this.tasks.has(this.currentTaskId)) {
             const currentHandle = this.tasks.get(this.currentTaskId);
-            if (currentHandle && (currentHandle.status === TaskStatus.EXECUTING || currentHandle.status === TaskStatus.PLANNING)) {
+            if (currentHandle &&
+                (currentHandle.status === TaskStatus.EXECUTING ||
+                    currentHandle.status === TaskStatus.PLANNING)) {
                 throw new Error('已有任务正在执行中，请等待完成后再发起新任务');
             }
         }
@@ -78,11 +91,25 @@ export class TaskEngine {
             catch (e) {
                 console.log('[TaskEngine] Could not get current page info:', e);
             }
-            const plan = await this.planner.plan(task, {
+            // 获取上一个已完成任务的结果（用于上下文理解）
+            let previousTaskResult = null;
+            if (this.lastCompletedTaskId) {
+                const previousHandle = this.tasks.get(this.lastCompletedTaskId);
+                if (previousHandle && previousHandle.status === TaskStatus.COMPLETED) {
+                    previousTaskResult = previousHandle.previousTaskResult;
+                }
+            }
+            const planContext = {
                 currentUrl,
                 currentPageContent,
                 pageStructure,
-            });
+            };
+            // 如果有上一个任务的结果，传递给 TaskPlanner
+            if (previousTaskResult) {
+                planContext.previousTaskResult = previousTaskResult;
+                console.log('[TaskEngine] Passing previous task result to planner:', Object.keys(previousTaskResult));
+            }
+            const plan = await this.planner.plan(task, planContext);
             handle.plan = plan;
             handle.status = TaskStatus.EXECUTING;
             handle.progress = {
@@ -136,18 +163,25 @@ export class TaskEngine {
                         break;
                     case 'node_error':
                         console.error(`[TaskEngine] Node error:`, event.error);
-                        // 检测是否有弹窗导致操作失败
-                        const popupStatusDuringError = await this.executor.checkLoginPopup();
-                        if (popupStatusDuringError.hasPopup) {
-                            console.log('[TaskEngine] Login popup detected during execution, pausing for user');
-                            this.sendToRenderer('task:waiting_login', {
-                                message: '检测到登录弹窗，请关闭后继续'
-                            });
-                            this.executor.pause();
-                            await this.waitForPopupClosed();
-                            this.executor.resume();
-                            // 弹窗关闭后，继续处理错误
+                        // 移除自动检测登录弹窗逻辑（方案B：改为用户触发式）
+                        // 登录弹窗检测改为用户手动触发：在UI界面点击"检测登录"按钮时调用
+                        // this.checkAndHandleLoginPopup()
+                        // ========== 优先使用 RecoveryEngine (v0.3新模块) ==========
+                        const recoveryResult = await this.handleNodeError(event, handle);
+                        if (recoveryResult.shouldContinue) {
+                            // 跳过或重试成功，继续下一步
+                            continue;
                         }
+                        if (recoveryResult.shouldReplan) {
+                            // RecoveryEngine失败，交给Replanner处理
+                            console.log('[TaskEngine] RecoveryEngine failed, falling back to Replanner');
+                        }
+                        else {
+                            // RecoveryEngine放弃，发送错误
+                            this.sendToRenderer('task:error', event);
+                            break;
+                        }
+                        // ========== Replanner (仅当RecoveryEngine失败后) ==========
                         // 尝试使用 LLM 驱动的 Replanner 恢复
                         const errorCode = event.error?.code || 'UNKNOWN';
                         const isRecoverable = event.error?.recoverable ?? true;
@@ -155,7 +189,9 @@ export class TaskEngine {
                             const executionState = {
                                 currentNodeId: event.node?.id || '',
                                 completedNodes: [],
-                                pageUrl: event.node?.action?.type === 'browser:navigate' ? event.node.action.params?.url : undefined,
+                                pageUrl: event.node?.action?.type === 'browser:navigate'
+                                    ? event.node.action.params?.url
+                                    : undefined,
                             };
                             let retryCount = 0;
                             let replanSuccess = false;
@@ -164,10 +200,13 @@ export class TaskEngine {
                                 // 获取当前页面内容
                                 const pageContent = await this.executor.getPageContent();
                                 const replanRequest = {
-                                    trigger: errorCode === 'SELECTOR_NOT_FOUND' ? ReplanTrigger.SELECTOR_INVALID :
-                                        errorCode === 'NAVIGATION_ERROR' ? ReplanTrigger.NAVIGATION_ERROR :
-                                            errorCode === 'WAIT_TIMEOUT' ? ReplanTrigger.TIMEOUT :
-                                                ReplanTrigger.ACTION_FAILED,
+                                    trigger: errorCode === 'SELECTOR_NOT_FOUND'
+                                        ? ReplanTrigger.SELECTOR_INVALID
+                                        : errorCode === 'NAVIGATION_ERROR'
+                                            ? ReplanTrigger.NAVIGATION_ERROR
+                                            : errorCode === 'WAIT_TIMEOUT'
+                                                ? ReplanTrigger.TIMEOUT
+                                                : ReplanTrigger.ACTION_FAILED,
                                     failedNodeId: event.node?.id,
                                     error: {
                                         code: errorCode,
@@ -185,12 +224,12 @@ export class TaskEngine {
                                     replanSuccess = true;
                                     this.sendToRenderer('task:statusUpdate', {
                                         status: 'replanning',
-                                        message: `正在重试 (${retryCount + 1}/3): ${replanResult.reason || '重新执行'}`
+                                        message: `正在重试 (${retryCount + 1}/3): ${replanResult.reason || '重新执行'}`,
                                     });
                                     // 应用 modifiedNodes 到计划
                                     if (replanResult.modifiedNodes) {
                                         for (const mod of replanResult.modifiedNodes) {
-                                            const nodeIndex = handle.plan.nodes.findIndex(n => n.id === mod.nodeId);
+                                            const nodeIndex = handle.plan.nodes.findIndex((n) => n.id === mod.nodeId);
                                             if (nodeIndex !== -1) {
                                                 if (mod.retryCount === -1) {
                                                     // 跳过节点
@@ -201,7 +240,7 @@ export class TaskEngine {
                                                     let mainSelector = mod.newSelector;
                                                     let fallback = [];
                                                     if (mod.newSelector.includes(',')) {
-                                                        const parts = mod.newSelector.split(',').map(s => s.trim());
+                                                        const parts = mod.newSelector.split(',').map((s) => s.trim());
                                                         mainSelector = parts[0];
                                                         fallback = parts.slice(1);
                                                     }
@@ -209,9 +248,11 @@ export class TaskEngine {
                                                     if (mod.fallbackSelectors && mod.fallbackSelectors.length > 0) {
                                                         fallback = [...fallback, ...mod.fallbackSelectors];
                                                     }
-                                                    handle.plan.nodes[nodeIndex].action.params.selector = mainSelector;
+                                                    handle.plan.nodes[nodeIndex].action.params.selector =
+                                                        mainSelector;
                                                     if (fallback.length > 0) {
-                                                        handle.plan.nodes[nodeIndex].action.params.fallbackSelectors = fallback;
+                                                        handle.plan.nodes[nodeIndex].action.params.fallbackSelectors =
+                                                            fallback;
                                                     }
                                                 }
                                                 else if (mod.newAction && handle.plan.nodes[nodeIndex].action) {
@@ -222,7 +263,7 @@ export class TaskEngine {
                                     }
                                     // 重规划成功后，重新执行当前失败的节点
                                     if (failedNodeId) {
-                                        const retryNodeIndex = handle.plan.nodes.findIndex(n => n.id === failedNodeId);
+                                        const retryNodeIndex = handle.plan.nodes.findIndex((n) => n.id === failedNodeId);
                                         if (retryNodeIndex !== -1) {
                                             const retryNode = handle.plan.nodes[retryNodeIndex];
                                             if (!retryNode.action) {
@@ -234,7 +275,10 @@ export class TaskEngine {
                                                 const retryResult = await this.executor.executeSingleAction(retryNode.action);
                                                 if (retryResult.success) {
                                                     console.log(`[TaskEngine] Retry succeeded for node: ${failedNodeId}`);
-                                                    this.sendToRenderer('task:nodeComplete', { node: retryNode, result: retryResult });
+                                                    this.sendToRenderer('task:nodeComplete', {
+                                                        node: retryNode,
+                                                        result: retryResult,
+                                                    });
                                                 }
                                                 else {
                                                     console.log(`[TaskEngine] Retry failed for node: ${failedNodeId}, retry count: ${retryCount + 1}`);
@@ -270,10 +314,13 @@ export class TaskEngine {
                                 continue;
                             }
                         }
+                        // 发送错误事件
                         this.sendToRenderer('task:error', event);
                         break;
                     case 'completed':
                         handle.status = TaskStatus.COMPLETED;
+                        handle.previousTaskResult = event.summary;
+                        this.lastCompletedTaskId = handle.id;
                         console.log(`[TaskEngine] Task completed, sending event to renderer`);
                         this.sendToRenderer('task:completed', { handleId, result: event.summary });
                         break;
@@ -359,13 +406,145 @@ export class TaskEngine {
     getState(handleId) {
         return this.tasks.get(handleId) || null;
     }
+    async ensureAgentModules() {
+        if (this.agentModulesInitialized)
+            return;
+        const page = this.executor.getBrowserPage();
+        if (!page) {
+            console.warn('[TaskEngine] No browser page available for agent modules');
+            return;
+        }
+        this.observer = new Observer(page);
+        this.verifier = new Verifier(page);
+        this.recoveryEngine = new RecoveryEngine(page);
+        this.agentModulesInitialized = true;
+        console.log('[TaskEngine] Agent modules initialized');
+    }
+    async handleNodeError(event, handle) {
+        await this.ensureAgentModules();
+        if (!this.observer || !this.verifier || !this.recoveryEngine) {
+            return { shouldContinue: false, shouldReplan: true };
+        }
+        const currentGraph = await this.observer.capture();
+        const verification = await this.verifier.verify(event.node.action, {
+            success: false,
+            error: event.error,
+            duration: 0,
+        });
+        console.log('[TaskEngine] Verification result:', verification);
+        this.memory.recordError({ code: event.error.code, message: event.error.message }, { action: event.node.action, pageUrl: currentGraph.url, nodeId: event.node.id });
+        const recoveryContext = {
+            failedAction: event.node.action,
+            failedNodeId: event.node.id,
+            actionResult: { success: false, error: event.error, duration: 0 },
+            currentGraph,
+            previousGraph: this.observer.getLastGraph(),
+            retryCount: 0,
+            maxRetries: 2,
+        };
+        const recoveryAction = await this.recoveryEngine.decide(recoveryContext);
+        console.log('[TaskEngine] Recovery action:', recoveryAction);
+        switch (recoveryAction.strategy) {
+            case RecoveryStrategy.RETRY_SAME:
+            case RecoveryStrategy.RETRY_WITH_WAIT:
+                if (recoveryAction.waitMs) {
+                    await this.executor.getBrowserPage().waitForTimeout(recoveryAction.waitMs);
+                }
+                return await this.retryNode(event.node, handle);
+            case RecoveryStrategy.USE_FALLBACK_SELECTOR:
+                if (recoveryAction.newSelector) {
+                    event.node.action.params.selector = recoveryAction.newSelector;
+                }
+                return await this.retryNode(event.node, handle);
+            case RecoveryStrategy.REGENERATE_SELECTOR:
+                const newSelector = await this.recoveryEngine.regenerateSelector(recoveryContext);
+                if (newSelector) {
+                    event.node.action.params.selector = newSelector;
+                    return await this.retryNode(event.node, handle);
+                }
+                return { shouldContinue: false, shouldReplan: true };
+            case RecoveryStrategy.SKIP_STEP:
+                console.log('[TaskEngine] Skipping failed step');
+                return { shouldContinue: true, shouldReplan: false };
+            case RecoveryStrategy.ASK_USER:
+                handle.status = TaskStatus.WAITING_CONFIRM;
+                this.sendToRenderer('task:waiting_user', {
+                    message: '操作失败，需要用户确认如何继续',
+                    nodeId: event.node.id,
+                });
+                return { shouldContinue: false, shouldReplan: false };
+            case RecoveryStrategy.GIVE_UP:
+            default:
+                return { shouldContinue: false, shouldReplan: false };
+        }
+    }
+    async retryNode(node, handle) {
+        try {
+            const retryResult = await this.executor.executeSingleAction(node.action);
+            if (retryResult.success) {
+                console.log('[TaskEngine] Retry succeeded');
+                this.sendToRenderer('task:nodeComplete', { node, result: retryResult });
+                return { shouldContinue: true, shouldReplan: false };
+            }
+            else {
+                console.log('[TaskEngine] Retry failed, will trigger Replanner');
+                return { shouldContinue: false, shouldReplan: true };
+            }
+        }
+        catch (error) {
+            console.error('[TaskEngine] Retry error:', error);
+            return { shouldContinue: false, shouldReplan: true };
+        }
+    }
+    async checkAndHandleLoginPopup() {
+        try {
+            const popupStatus = await this.executor.checkLoginPopup();
+            if (popupStatus.hasPopup) {
+                console.log('[TaskEngine] Login popup detected, waiting for user to handle');
+                // 暂停任务
+                this.executor.pause();
+                // 通知用户处理
+                this.sendToRenderer('task:waiting_login', {
+                    message: '检测到登录弹窗，请完成登录后点击"继续"',
+                    popupType: popupStatus.popupType || 'unknown',
+                });
+                // 等待用户确认完成
+                await this.waitForUserConfirm('login_completed');
+                // 用户处理完成后，继续任务
+                this.executor.resume();
+                return { handled: true, message: '登录弹窗已处理' };
+            }
+            return { handled: false, message: '未检测到登录弹窗' };
+        }
+        catch (error) {
+            console.error('[TaskEngine] Check login popup error:', error);
+            return { handled: false, message: '检测失败' };
+        }
+    }
+    async waitForUserConfirm(confirmType) {
+        return new Promise((resolve) => {
+            const checkInterval = setInterval(async () => {
+                // 检查是否收到用户确认
+                const handle = this.tasks.get(this.currentTaskId || '');
+                if (handle?.status === TaskStatus.EXECUTING) {
+                    clearInterval(checkInterval);
+                    resolve();
+                }
+            }, 1000);
+            setTimeout(() => {
+                clearInterval(checkInterval);
+                console.log('[TaskEngine] User confirm wait timeout');
+                resolve();
+            }, 60000); // 1分钟超时
+        });
+    }
     sendToRenderer(channel, data) {
         console.log('[TaskEngine] sendToRenderer called:', {
             channel,
             mainWindowExists: !!this.mainWindow,
             mainWindowDestroyed: this.mainWindow?.isDestroyed(),
             previewWindowExists: !!this.previewWindow,
-            data: JSON.stringify(data).substring(0, 100)
+            data: JSON.stringify(data).substring(0, 100),
         });
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
             this.mainWindow.webContents.send(channel, data);

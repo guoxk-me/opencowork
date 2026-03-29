@@ -73,6 +73,11 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     return { state };
   },
 
+  'task:checkLoginPopup': async (mainWindow, previewWindow, {}) => {
+    const result = await taskEngine.checkAndHandleLoginPopup();
+    return result;
+  },
+
   // 预览相关
   'preview:setMode': async (mainWindow, previewWindow, { mode }) => {
     // sidebar 模式由 Renderer 处理（通过截图显示），不需要 BrowserView

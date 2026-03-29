@@ -93,9 +93,9 @@ return {
   error: {
     code: 'SELECTOR_ERROR',
     message: 'Element not found: ' + selector,
-    recoverable: true
+    recoverable: true,
   },
-  duration: Date.now() - startTime
+  duration: Date.now() - startTime,
 };
 ```
 
@@ -144,10 +144,10 @@ console.error('[TaskEngine] Node error:', error);
 
 ### Console Logging Levels
 
-| Level | Usage |
-|-------|-------|
-| `console.log` | Normal operation, state transitions |
-| `console.warn` | Recoverable issues, retries |
+| Level           | Usage                                |
+| --------------- | ------------------------------------ |
+| `console.log`   | Normal operation, state transitions  |
+| `console.warn`  | Recoverable issues, retries          |
 | `console.error` | Fatal errors, unrecoverable failures |
 
 ### File Organization
@@ -168,6 +168,7 @@ src/
 ### Action Schema Patterns
 
 Follow the pattern in `ActionSchema.ts`:
+
 - Each action type has an interface extending `BaseAction`
 - Use `ActionType` enum for type discrimination
 - Params must match the action's parameter structure
@@ -193,8 +194,11 @@ export interface BrowserClickAction extends BaseAction {
 ### Important Project Conventions
 
 1. **Backup before modifying**: Always backup files before editing
+
    ```bash
+   # Move backup files to backup folder
    cp file.ts file.ts.bak.$(date +%Y%m%d_%H%M%S)
+   mv file.ts.bak.* ./backup/
    ```
 
 2. **LLM Integration**: Use `getLLMClient()` from `../../llm/OpenAIResponses`
@@ -218,7 +222,7 @@ import { CLIExecutor } from '../CLIExecutor';
 describe('CLIExecutor', () => {
   let executor: CLIExecutor;
   beforeEach(() => { executor = new CLIExecutor(); });
-  
+
   it('should execute whitelisted commands', async () => { ... });
 });
 ```
@@ -228,6 +232,44 @@ describe('CLIExecutor', () => {
 - Update CHANGELOG.md for version changes
 - Update USER_GUIDE.md for feature changes
 - Update relevant SPEC files for specification changes
+
+## GitHub Workflow
+
+### Repository
+
+- **URL**: https://github.com/LeonGaoHaining/opencowork
+- **Branch**: main
+
+### Push Changes
+
+```bash
+# Add and commit changes
+git add .
+git commit -m "Description of changes"
+
+# Push to GitHub
+git push
+```
+
+### Create Pull Request
+
+1. Create a new branch: `git checkout -b feature/your-feature`
+2. Make changes and commit
+3. Push branch: `git push -u origin feature/your-feature`
+4. Open PR on GitHub
+
+### Sync with Remote
+
+```bash
+# Fetch latest
+git fetch origin
+
+# Pull changes
+git pull origin main
+
+# Rebase branch
+git rebase origin/main
+```
 
 ---
 

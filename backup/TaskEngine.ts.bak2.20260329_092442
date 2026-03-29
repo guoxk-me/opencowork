@@ -32,7 +32,6 @@ export interface TaskHandle {
   progress: { current: number; total: number };
   createdAt: number;
   updatedAt: number;
-  previousTaskResult?: any;
 }
 
 export interface TakeoverContext {
@@ -55,7 +54,6 @@ export class TaskEngine {
   private mainWindow: BrowserWindow | null = null;
   private previewWindow: BrowserWindow | null = null;
   private currentTaskId: string | null = null;
-  private lastCompletedTaskId: string | null = null;
 
   private observer: Observer | null = null;
   private verifier: Verifier | null = null;
@@ -134,31 +132,11 @@ export class TaskEngine {
         console.log('[TaskEngine] Could not get current page info:', e);
       }
 
-      // 获取上一个已完成任务的结果（用于上下文理解）
-      let previousTaskResult = null;
-      if (this.lastCompletedTaskId) {
-        const previousHandle = this.tasks.get(this.lastCompletedTaskId);
-        if (previousHandle && previousHandle.status === TaskStatus.COMPLETED) {
-          previousTaskResult = previousHandle.previousTaskResult;
-        }
-      }
-
-      const planContext: any = {
+      const plan = await this.planner.plan(task, {
         currentUrl,
         currentPageContent,
         pageStructure,
-      };
-
-      // 如果有上一个任务的结果，传递给 TaskPlanner
-      if (previousTaskResult) {
-        planContext.previousTaskResult = previousTaskResult;
-        console.log(
-          '[TaskEngine] Passing previous task result to planner:',
-          Object.keys(previousTaskResult)
-        );
-      }
-
-      const plan = await this.planner.plan(task, planContext);
+      });
 
       handle.plan = plan;
       handle.status = TaskStatus.EXECUTING;
@@ -217,28 +195,21 @@ export class TaskEngine {
           case 'node_error':
             console.error(`[TaskEngine] Node error:`, event.error);
 
-            // 移除自动检测登录弹窗逻辑（方案B：改为用户触发式）
-            // 登录弹窗检测改为用户手动触发：在UI界面点击"检测登录"按钮时调用
-            // this.checkAndHandleLoginPopup()
+            // 检测是否有弹窗导致操作失败
+            const popupStatusDuringError = await this.executor.checkLoginPopup();
+            if (popupStatusDuringError.hasPopup) {
+              console.log('[TaskEngine] Login popup detected during execution, pausing for user');
+              this.sendToRenderer('task:waiting_login', {
+                message: '检测到登录弹窗，请关闭后继续',
+              });
 
-            // ========== 优先使用 RecoveryEngine (v0.3新模块) ==========
-            const recoveryResult = await this.handleNodeError(event, handle);
+              this.executor.pause();
+              await this.waitForPopupClosed();
+              this.executor.resume();
 
-            if (recoveryResult.shouldContinue) {
-              // 跳过或重试成功，继续下一步
-              continue;
+              // 弹窗关闭后，继续处理错误
             }
 
-            if (recoveryResult.shouldReplan) {
-              // RecoveryEngine失败，交给Replanner处理
-              console.log('[TaskEngine] RecoveryEngine failed, falling back to Replanner');
-            } else {
-              // RecoveryEngine放弃，发送错误
-              this.sendToRenderer('task:error', event);
-              break;
-            }
-
-            // ========== Replanner (仅当RecoveryEngine失败后) ==========
             // 尝试使用 LLM 驱动的 Replanner 恢复
             const errorCode = event.error?.code || 'UNKNOWN';
             const isRecoverable = event.error?.recoverable ?? true;
@@ -401,8 +372,6 @@ export class TaskEngine {
             break;
           case 'completed':
             handle.status = TaskStatus.COMPLETED;
-            handle.previousTaskResult = event.summary;
-            this.lastCompletedTaskId = handle.id;
             console.log(`[TaskEngine] Task completed, sending event to renderer`);
             this.sendToRenderer('task:completed', { handleId, result: event.summary });
             break;
@@ -610,57 +579,6 @@ export class TaskEngine {
       console.error('[TaskEngine] Retry error:', error);
       return { shouldContinue: false, shouldReplan: true };
     }
-  }
-
-  async checkAndHandleLoginPopup(): Promise<{ handled: boolean; message: string }> {
-    try {
-      const popupStatus = await this.executor.checkLoginPopup();
-
-      if (popupStatus.hasPopup) {
-        console.log('[TaskEngine] Login popup detected, waiting for user to handle');
-
-        // 暂停任务
-        this.executor.pause();
-
-        // 通知用户处理
-        this.sendToRenderer('task:waiting_login', {
-          message: '检测到登录弹窗，请完成登录后点击"继续"',
-          popupType: popupStatus.popupType || 'unknown',
-        });
-
-        // 等待用户确认完成
-        await this.waitForUserConfirm('login_completed');
-
-        // 用户处理完成后，继续任务
-        this.executor.resume();
-
-        return { handled: true, message: '登录弹窗已处理' };
-      }
-
-      return { handled: false, message: '未检测到登录弹窗' };
-    } catch (error) {
-      console.error('[TaskEngine] Check login popup error:', error);
-      return { handled: false, message: '检测失败' };
-    }
-  }
-
-  private async waitForUserConfirm(confirmType: string): Promise<void> {
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(async () => {
-        // 检查是否收到用户确认
-        const handle = this.tasks.get(this.currentTaskId || '');
-        if (handle?.status === TaskStatus.EXECUTING) {
-          clearInterval(checkInterval);
-          resolve();
-        }
-      }, 1000);
-
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        console.log('[TaskEngine] User confirm wait timeout');
-        resolve();
-      }, 60000); // 1分钟超时
-    });
   }
 
   private sendToRenderer(channel: string, data: any): void {

@@ -97,7 +97,7 @@ export class BrowserExecutor {
     try {
       // 使用 playwright-extra（不使用 stealth 插件，手动实现反检测）
       const { chromium } = require('playwright-extra');
-
+      
       this.browser = await chromium.launch({
         headless: true,
         args: [
@@ -106,20 +106,19 @@ export class BrowserExecutor {
           '--disable-blink-features=AutomationControlled',
         ],
       });
-
+      
       this.context = await this.browser.newContext({
         viewport: { width: 1280, height: 720 },
-        userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       });
       this.page = await this.context.newPage();
-
+      
       // 手动反检测脚本
       await this.page.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', {
           get: () => undefined,
         });
-
+        
         if (window.navigator.permissions) {
           // @ts-ignore
           window.navigator.permissions.query = (parameters: any) => {
@@ -129,21 +128,21 @@ export class BrowserExecutor {
             return Promise.resolve({ state: 'prompt' } as any);
           };
         }
-
+        
         Object.defineProperty(navigator, 'plugins', {
           get: () => [1, 2, 3, 4, 5],
         });
-
+        
         Object.defineProperty(navigator, 'languages', {
           get: () => ['zh-CN', 'zh', 'en'],
         });
       });
-
+      
       // 设置实时截图服务
       this.screencast.setPage(this.page);
       this.screencast.setMainWindow(mainWindowRef);
       this.screencast.start();
-
+      
       console.log('[BrowserExecutor] Browser launched with manual stealth');
     } catch (error) {
       console.error('[BrowserExecutor] Failed to launch browser:', error);
@@ -167,10 +166,7 @@ export class BrowserExecutor {
     try {
       await this.page.goto(url, { waitUntil, timeout: 30000 });
     } catch (navError: any) {
-      console.warn(
-        '[BrowserExecutor] Navigation failed, trying with networkidle:',
-        navError.message
-      );
+      console.warn('[BrowserExecutor] Navigation failed, trying with networkidle:', navError.message);
       try {
         await this.page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
       } catch (retryError: any) {
@@ -206,14 +202,14 @@ export class BrowserExecutor {
     // 预处理选择器：拆分逗号分隔的选择器，处理 contains 语法
     let processedSelector = selector;
     let processedFallbacks = fallbackSelectors || [];
-
+    
     // 如果选择器包含逗号，拆分成主选择器和备用选择器
     if (selector.includes(',')) {
-      const parts = selector.split(',').map((s) => s.trim());
+      const parts = selector.split(',').map(s => s.trim());
       processedSelector = parts[0];
       processedFallbacks = [...parts.slice(1), ...processedFallbacks];
     }
-
+    
     // 处理 contains 语法，提取为 textMatch
     if (processedSelector.includes('contains(')) {
       const containsMatch = processedSelector.match(/contains\(['"](.+)['"]\)/);
@@ -261,15 +257,7 @@ export class BrowserExecutor {
   }
 
   private async input(action: BrowserInputAction, startTime: number): Promise<ActionResult> {
-    const {
-      selector,
-      text,
-      clear = true,
-      delay = 0,
-      textMatch,
-      fallbackSelectors,
-      pressEnter = false,
-    } = action.params;
+    const { selector, text, clear = true, delay = 0, textMatch, fallbackSelectors, pressEnter = false } = action.params;
     this.retryCount = 0;
 
     console.log(`[BrowserExecutor] Input to: ${selector}, pressEnter: ${pressEnter}`);
@@ -277,9 +265,9 @@ export class BrowserExecutor {
     // 预处理选择器：拆分逗号分隔的选择器
     let processedSelector = selector;
     let processedFallbacks = fallbackSelectors || [];
-
+    
     if (selector.includes(',')) {
-      const parts = selector.split(',').map((s) => s.trim());
+      const parts = selector.split(',').map(s => s.trim());
       processedSelector = parts[0];
       processedFallbacks = [...parts.slice(1), ...processedFallbacks];
     }
@@ -302,9 +290,7 @@ export class BrowserExecutor {
 
     // input 成功后，根据 pressEnter 参数决定是否按 Enter
     if (result.success && pressEnter) {
-      console.log(
-        `[BrowserExecutor] Input succeeded, waiting 100ms then pressing Enter on element`
-      );
+      console.log(`[BrowserExecutor] Input succeeded, waiting 100ms then pressing Enter on element`);
       try {
         await this.page.waitForTimeout(100);
         const inputElement = this.page.locator(processedSelector).first();
@@ -332,13 +318,11 @@ export class BrowserExecutor {
         let currentSelector = selector;
 
         if (attempt > 0) {
-          console.log(
-            `[BrowserExecutor] Retry attempt ${attempt}/${maxRetries} with selector: ${currentSelector}`
-          );
+          console.log(`[BrowserExecutor] Retry attempt ${attempt}/${maxRetries} with selector: ${currentSelector}`);
         }
 
         await operation(currentSelector, index);
-
+        
         return {
           success: true,
           output: { selector: currentSelector },
@@ -346,7 +330,7 @@ export class BrowserExecutor {
         };
       } catch (error: any) {
         const errorMessage = error.message || '';
-
+        
         if (attempt === maxRetries) {
           console.error(`[BrowserExecutor] All selector strategies exhausted`);
           return {
@@ -379,10 +363,7 @@ export class BrowserExecutor {
               };
             }
           } catch (textError: unknown) {
-            console.warn(
-              '[BrowserExecutor] textMatch failed:',
-              textError instanceof Error ? textError.message : String(textError)
-            );
+            console.warn('[BrowserExecutor] textMatch failed:', textError instanceof Error ? textError.message : String(textError));
           }
         }
 
@@ -428,7 +409,7 @@ export class BrowserExecutor {
       const htmlSnippet = html.substring(0, 8000);
 
       const systemPrompt = `你是一个CSS选择器生成专家。根据页面HTML片段，生成更可靠的选择器。`;
-
+      
       const userPrompt = `页面HTML片段：
 ${htmlSnippet}
 
@@ -444,14 +425,7 @@ ${htmlSnippet}
       const response = await this.llmClient.chat(messages);
       const newSelector = response.content.trim();
 
-      if (
-        newSelector &&
-        (newSelector.startsWith('.') ||
-          newSelector.startsWith('#') ||
-          newSelector.startsWith('[') ||
-          newSelector.startsWith('div') ||
-          newSelector.startsWith('button'))
-      ) {
+      if (newSelector && (newSelector.startsWith('.') || newSelector.startsWith('#') || newSelector.startsWith('[') || newSelector.startsWith('div') || newSelector.startsWith('button'))) {
         console.log('[BrowserExecutor] LLM generated new selector:', newSelector);
         return newSelector;
       }
@@ -494,80 +468,41 @@ ${htmlSnippet}
   }
 
   private async extract(action: BrowserExtractAction, startTime: number): Promise<ActionResult> {
-    const { selector, type = 'text', multiple = true } = action.params;
+    const { selector, type = 'text', multiple = false } = action.params;
 
-    console.log(`[BrowserExecutor] Extracting from: ${selector}, multiple: ${multiple}`);
+    console.log(`[BrowserExecutor] Extracting from: ${selector}`);
 
     try {
       const element = this.page.locator(selector);
       let output: any;
 
-      // 检查匹配的元素数量
-      const elements = await element.all();
-      const elementCount = elements.length;
-
-      console.log(`[BrowserExecutor] Found ${elementCount} elements matching selector`);
-
-      // 自动处理多元素场景
-      if (elementCount > 1 && !multiple) {
-        // 多个元素但要求单元素 → 自动取第一个
-        console.log(
-          `[BrowserExecutor] Multiple elements found (${elementCount}), but multiple=false. Using first element.`
-        );
-        const firstElement = elements[0];
-
-        switch (type) {
-          case 'text':
-            output = await firstElement.textContent();
-            break;
-          case 'html':
-            output = await firstElement.innerHTML();
-            break;
-          default:
-            output = await firstElement.textContent();
-        }
-      } else if (elementCount > 1 && multiple) {
-        // 多个元素且要求多元素 → 批量提取
-        switch (type) {
-          case 'text':
-            output = await element.allTextContents();
-            break;
-          case 'html':
-            output = await element.allInnerHTMLs();
-            break;
-          default:
-            output = await element.allTextContents();
-        }
-      } else {
-        // 单个元素
-        switch (type) {
-          case 'text':
-            output = await element.textContent();
-            break;
-          case 'html':
-            output = await element.innerHTML();
-            break;
-          case 'json':
-            output = await element.evaluate((el: any) => {
-              try {
-                return JSON.parse(el.textContent || '');
-              } catch {
-                return el.textContent;
-              }
+      switch (type) {
+        case 'text':
+          output = multiple ? await element.allTextContents() : await element.textContent();
+          break;
+        case 'html':
+          output = multiple ? await element.allInnerHTMLs() : await element.innerHTML();
+          break;
+        case 'json':
+          output = await element.evaluate((el: any) => {
+            try {
+              return JSON.parse(el.textContent || '');
+            } catch {
+              return el.textContent;
+            }
+          });
+          break;
+        case 'table':
+          output = await element.evaluate((table: any) => {
+            const rows = table.querySelectorAll('tr');
+            return Array.from(rows).map((row: any) => {
+              const cells = row.querySelectorAll('th, td');
+              return Array.from(cells).map((c: any) => c.textContent);
             });
-            break;
-          case 'table':
-            output = await element.evaluate((table: any) => {
-              const rows = table.querySelectorAll('tr');
-              return Array.from(rows).map((row: any) => {
-                const cells = row.querySelectorAll('th, td');
-                return Array.from(cells).map((c: any) => c.textContent);
-              });
-            });
-            break;
-          default:
-            output = await element.textContent();
-        }
+          });
+          break;
+        default:
+          output = await element.textContent();
       }
 
       return {
@@ -588,10 +523,7 @@ ${htmlSnippet}
     }
   }
 
-  private async screenshot(
-    action: BrowserScreenshotAction,
-    startTime: number
-  ): Promise<ActionResult> {
+  private async screenshot(action: BrowserScreenshotAction, startTime: number): Promise<ActionResult> {
     const { fullPage = false, selector } = action.params;
 
     console.log(`[BrowserExecutor] Taking screenshot (fullPage: ${fullPage})`);
@@ -601,9 +533,9 @@ ${htmlSnippet}
 
       if (selector) {
         const element = this.page.locator(selector);
-        screenshot = (await element.screenshot({})) as Buffer;
+        screenshot = await element.screenshot({}) as Buffer;
       } else {
-        screenshot = (await this.page.screenshot({ fullPage })) as Buffer;
+        screenshot = await this.page.screenshot({ fullPage }) as Buffer;
       }
 
       const base64 = screenshot.toString('base64');
@@ -688,21 +620,18 @@ ${htmlSnippet}
       const structure = await this.page.evaluate(() => {
         const getUniqueSelector = (el: Element): string => {
           if (el.id) return `#${el.id}`;
-
+          
           let selector = el.tagName.toLowerCase();
           if (el.className && typeof el.className === 'string') {
-            const classes = el.className
-              .trim()
-              .split(/\s+/)
-              .filter((c) => c);
+            const classes = el.className.trim().split(/\s+/).filter(c => c);
             if (classes.length > 0) {
               selector += '.' + classes.slice(0, 2).join('.');
             }
           }
-
+          
           const parent = el.parentElement;
           if (parent) {
-            const siblings = Array.from(parent.children).filter((e) => e.tagName === el.tagName);
+            const siblings = Array.from(parent.children).filter(e => e.tagName === el.tagName);
             if (siblings.length > 1) {
               const index = siblings.indexOf(el) + 1;
               selector += `:nth-child(${index})`;
@@ -717,20 +646,20 @@ ${htmlSnippet}
 
         const links: any[] = [];
         const containers: Set<string> = new Set();
-
+        
         const allLinks = document.querySelectorAll('a');
         const maxLinks = 30;
         let count = 0;
-
+        
         for (const link of allLinks) {
           if (count >= maxLinks) break;
-
+          
           const href = link.getAttribute('href') || '';
           const text = link.textContent?.trim() || '';
-
+          
           if (!href || href === '#' || href.startsWith('javascript:')) continue;
           if (!text) continue;
-
+          
           const selector = getUniqueSelector(link);
           const parentEl = link.parentElement;
           let parentContext = '';
@@ -740,10 +669,10 @@ ${htmlSnippet}
               parentContext = '.' + parentEl.className.trim().split(/\s+/)[0];
             }
           }
-
+          
           const siblings = parentEl ? Array.from(parentEl.querySelectorAll(':scope > a')) : [];
           const index = siblings.indexOf(link);
-
+          
           const box = link.getBoundingClientRect();
           links.push({
             href: href.substring(0, 200),
@@ -753,92 +682,75 @@ ${htmlSnippet}
             index,
             boundingBox: { x: box.x, y: box.y, width: box.width, height: box.height },
           });
-
+          
           if (parentContext) containers.add(parentContext);
           count++;
         }
-
+        
         // 对 links 进行排序，主要内容区的链接优先
         const sortedLinks = [...links].sort((a, b) => {
           const mainKeywords = ['feed', 'article', 'note', 'content', 'result', 'list', 'card'];
           const excludeKeywords = [
-            'sidebar',
-            'side-bar',
-            'channel',
-            'nav',
-            'header',
-            'footer',
-            'user',
-            'profile',
-            'guide',
-            'tab',
+            'sidebar', 'side-bar', 'channel', 'nav', 'header', 
+            'footer', 'user', 'profile', 'guide', 'tab'
           ];
-
+          
           const aParent = (a.parentContext || '').toLowerCase();
           const bParent = (b.parentContext || '').toLowerCase();
           const aSelector = (a.selector || '').toLowerCase();
           const bSelector = (b.selector || '').toLowerCase();
-
+          
           // 第一步：排除侧边栏/导航元素（同时检查 parentContext 和 selector）
-          const aIsExcluded = excludeKeywords.some(
-            (k) => aParent.includes(k) || aSelector.includes(k)
+          const aIsExcluded = excludeKeywords.some(k => 
+            aParent.includes(k) || aSelector.includes(k)
           );
-          const bIsExcluded = excludeKeywords.some(
-            (k) => bParent.includes(k) || bSelector.includes(k)
+          const bIsExcluded = excludeKeywords.some(k => 
+            bParent.includes(k) || bSelector.includes(k)
           );
-
-          if (aIsExcluded && !bIsExcluded) return 1; // 侧边栏排后面
+          
+          if (aIsExcluded && !bIsExcluded) return 1;  // 侧边栏排后面
           if (!aIsExcluded && bIsExcluded) return -1; // 主要内容排前面
-
+          
           // 第二步：在主要内容中找包含关键词的
-          const aIsMain = mainKeywords.some((k) => aParent.includes(k) || aSelector.includes(k));
-          const bIsMain = mainKeywords.some((k) => bParent.includes(k) || bSelector.includes(k));
-
+          const aIsMain = mainKeywords.some(k => aParent.includes(k) || aSelector.includes(k));
+          const bIsMain = mainKeywords.some(k => bParent.includes(k) || bSelector.includes(k));
+          
           if (aIsMain && !bIsMain) return -1;
           if (!aIsMain && bIsMain) return 1;
-
+          
           // 第三步：按原始索引排序
           return a.index - b.index;
         });
-
+        
         const mainContainers = Array.from(document.querySelectorAll('div[class]'))
-          .filter((el) => {
+          .filter(el => {
             const className = (el.className as string).toLowerCase();
             const id = (el.id || '').toLowerCase();
-
+            
             // 排除侧边栏、导航栏等非主要内容区
-            if (
-              className.includes('sidebar') ||
-              className.includes('side-bar') ||
-              className.includes('channel') ||
-              className.includes('nav') ||
-              className.includes('header') ||
-              className.includes('footer') ||
-              id.includes('sidebar') ||
-              id.includes('channel') ||
-              id.includes('nav')
-            ) {
+            if (className.includes('sidebar') || className.includes('side-bar') ||
+                className.includes('channel') || className.includes('nav') ||
+                className.includes('header') || className.includes('footer') ||
+                id.includes('sidebar') || id.includes('channel') || id.includes('nav')) {
               return false;
             }
-
+            
             // 匹配主要内容区
-            return (
-              className.includes('feed') ||
-              className.includes('article') ||
-              className.includes('list') ||
-              className.includes('content') ||
-              className.includes('card') ||
-              className.includes('result') ||
-              className.includes('note')
-            );
+            return className.includes('feed') || 
+                   className.includes('article') || 
+                   className.includes('list') ||
+                   className.includes('content') ||
+                   className.includes('card') ||
+                   className.includes('result') ||
+                   className.includes('note');
           })
           .sort((a, b) => b.children.length - a.children.length)
           .slice(0, 10)
-          .map((el) => ({
+          .map(el => ({
             selector: getUniqueSelector(el),
             childCount: el.children.length,
           }));
-
+        
         return {
           title: document.title || '',
           links: sortedLinks,
@@ -847,7 +759,7 @@ ${htmlSnippet}
           mainContainers,
         };
       });
-
+      
       return structure;
     } catch (error) {
       console.error('[BrowserExecutor] Failed to get page structure:', error);
@@ -869,23 +781,17 @@ ${htmlSnippet}
 
   async checkLoginPopup(): Promise<{ hasPopup: boolean; popupType?: string }> {
     if (!this.page) return { hasPopup: false };
-
+    
     try {
       const result = await this.page.evaluate(() => {
         const popupSelectors = [
-          '[class*="login-popup"]',
-          '[class*="login-modal"]',
-          '[class*="login-dialog"]',
-          '[class*="login-mask"]',
-          '[class*="qrcode-login"]',
-          '[class*="wechat-login"]',
-          '[class*="login-tip"]',
-          '[class*="login-required"]',
-          '.mask',
-          '[class*="overlay"]',
-          '[class*="popup"]',
+          '[class*="login-popup"]', '[class*="login-modal"]',
+          '[class*="login-dialog"]', '[class*="login-mask"]',
+          '[class*="qrcode-login"]', '[class*="wechat-login"]',
+          '[class*="login-tip"]', '[class*="login-required"]',
+          '.mask', '[class*="overlay"]', '[class*="popup"]',
         ];
-
+        
         for (const selector of popupSelectors) {
           const el = document.querySelector(selector);
           if (el) {
@@ -895,10 +801,10 @@ ${htmlSnippet}
             }
           }
         }
-
+        
         return { hasPopup: false };
       });
-
+      
       return result;
     } catch (error) {
       console.error('[BrowserExecutor] Failed to check login popup:', error);

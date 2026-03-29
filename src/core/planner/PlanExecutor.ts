@@ -13,7 +13,11 @@ interface ExecutionCallbacks {
 type ExecutionEvent =
   | { type: 'node_start'; node: PlanNode }
   | { type: 'node_complete'; node: PlanNode; result: any }
-  | { type: 'node_error'; node: PlanNode; error: { message: string; code?: string; recoverable?: boolean } }
+  | {
+      type: 'node_error';
+      node: PlanNode;
+      error: { message: string; code?: string; recoverable?: boolean };
+    }
   | { type: 'condition_eval'; expression: string; result: boolean }
   | { type: 'loop_iteration'; node: PlanNode; iteration: number }
   | { type: 'paused'; node: PlanNode }
@@ -100,6 +104,7 @@ export class PlanExecutor {
     this.paused = false;
     this.cancelled = false;
     this.callbacks = callbacks || {};
+    let lastResult: any = null;
 
     console.log(`[PlanExecutor] Starting execution of plan ${plan.id}`);
 
@@ -123,19 +128,24 @@ export class PlanExecutor {
 
         if (node.action) {
           const result = await this.executeAction(node.action);
-          
+
           if (result.success) {
+            lastResult = result;
             yield { type: 'node_complete', node, result };
             this.callbacks.onNodeComplete?.(node, result);
           } else {
             const error = new Error(result.error?.message || 'Action failed');
-            yield { type: 'node_error', node, error: { 
-              message: error.message, 
-              code: result.error?.code,
-              recoverable: result.error?.recoverable ?? true
-            } };
+            yield {
+              type: 'node_error',
+              node,
+              error: {
+                message: error.message,
+                code: result.error?.code,
+                recoverable: result.error?.recoverable ?? true,
+              },
+            };
             this.callbacks.onNodeError?.(node, error);
-            
+
             if (!result.error?.recoverable) {
               yield { type: 'failed', error };
               return;
@@ -152,8 +162,75 @@ export class PlanExecutor {
     }
 
     if (!this.cancelled) {
-      yield { type: 'completed', summary: {} };
+      const formattedSummary = this.formatTaskSummary(lastResult, this.plan);
+      yield { type: 'completed', summary: formattedSummary };
     }
+  }
+
+  private formatTaskSummary(result: any, plan: Plan | null): any {
+    if (!result || !result.success) {
+      return {};
+    }
+
+    const output = result.output;
+    if (!output) {
+      return result;
+    }
+
+    if (Array.isArray(output) && output.length > 0) {
+      const formattedItems = output
+        .map((item: string) => this.cleanHtmlText(item))
+        .filter((item: string) => item.trim().length > 0)
+        .map((item: string, index: number) => {
+          const lines = item
+            .split('\n')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l);
+          const title = lines[0] || `结果 ${index + 1}`;
+          const description = lines.slice(1, 3).join(' ').substring(0, 100);
+          return { title, description: description + (description.length === 100 ? '...' : '') };
+        });
+
+      if (formattedItems.length > 0) {
+        return {
+          success: true,
+          type: 'extract_results',
+          items: formattedItems,
+          totalCount: formattedItems.length,
+          formatted: this.formatAsList(formattedItems),
+        };
+      }
+    }
+
+    if (typeof output === 'string') {
+      return {
+        success: true,
+        type: 'text',
+        content: this.cleanHtmlText(output),
+      };
+    }
+
+    return result;
+  }
+
+  private cleanHtmlText(text: string): string {
+    return text
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private formatAsList(items: { title: string; description: string }[]): string {
+    return items
+      .map(
+        (item, index) =>
+          `${index + 1}. ${item.title}${item.description ? `\n   ${item.description}` : ''}`
+      )
+      .join('\n\n');
   }
 
   private async executeAction(action: AnyAction): Promise<any> {

@@ -163,7 +163,7 @@ export class BrowserExecutor {
         let processedFallbacks = fallbackSelectors || [];
         // 如果选择器包含逗号，拆分成主选择器和备用选择器
         if (selector.includes(',')) {
-            const parts = selector.split(',').map(s => s.trim());
+            const parts = selector.split(',').map((s) => s.trim());
             processedSelector = parts[0];
             processedFallbacks = [...parts.slice(1), ...processedFallbacks];
         }
@@ -199,28 +199,29 @@ export class BrowserExecutor {
                 throw new Error(`Element not found: ${sel}`);
             }
             const targetElement = elements[idx] || elements[0];
+            await targetElement.scrollIntoViewIfNeeded();
             await targetElement.click({ force: true });
         }, startTime);
         return result;
     }
     async input(action, startTime) {
-        const { selector, text, clear = true, delay = 0, textMatch, fallbackSelectors, pressEnter = false } = action.params;
+        const { selector, text, clear = true, delay = 0, textMatch, fallbackSelectors, pressEnter = false, } = action.params;
         this.retryCount = 0;
         console.log(`[BrowserExecutor] Input to: ${selector}, pressEnter: ${pressEnter}`);
         // 预处理选择器：拆分逗号分隔的选择器
         let processedSelector = selector;
         let processedFallbacks = fallbackSelectors || [];
         if (selector.includes(',')) {
-            const parts = selector.split(',').map(s => s.trim());
+            const parts = selector.split(',').map((s) => s.trim());
             processedSelector = parts[0];
             processedFallbacks = [...parts.slice(1), ...processedFallbacks];
         }
         const result = await this.executeWithSelectorStrategy(processedSelector, 0, textMatch, processedFallbacks, async (sel) => {
             const element = this.page.locator(sel);
+            await element.scrollIntoViewIfNeeded();
             if (clear) {
                 await element.clear({ force: true });
             }
-            // 改用 type() 代替 fill()，触发真实键盘事件
             await element.type(text, { delay: 50, force: true });
         }, startTime);
         // input 成功后，根据 pressEnter 参数决定是否按 Enter
@@ -339,7 +340,12 @@ ${htmlSnippet}
             ];
             const response = await this.llmClient.chat(messages);
             const newSelector = response.content.trim();
-            if (newSelector && (newSelector.startsWith('.') || newSelector.startsWith('#') || newSelector.startsWith('[') || newSelector.startsWith('div') || newSelector.startsWith('button'))) {
+            if (newSelector &&
+                (newSelector.startsWith('.') ||
+                    newSelector.startsWith('#') ||
+                    newSelector.startsWith('[') ||
+                    newSelector.startsWith('div') ||
+                    newSelector.startsWith('button'))) {
                 console.log('[BrowserExecutor] LLM generated new selector:', newSelector);
                 return newSelector;
             }
@@ -379,39 +385,75 @@ ${htmlSnippet}
         }
     }
     async extract(action, startTime) {
-        const { selector, type = 'text', multiple = false } = action.params;
-        console.log(`[BrowserExecutor] Extracting from: ${selector}`);
+        const { selector, type = 'text', multiple = true } = action.params;
+        console.log(`[BrowserExecutor] Extracting from: ${selector}, multiple: ${multiple}`);
         try {
             const element = this.page.locator(selector);
             let output;
-            switch (type) {
-                case 'text':
-                    output = multiple ? await element.allTextContents() : await element.textContent();
-                    break;
-                case 'html':
-                    output = multiple ? await element.allInnerHTMLs() : await element.innerHTML();
-                    break;
-                case 'json':
-                    output = await element.evaluate((el) => {
-                        try {
-                            return JSON.parse(el.textContent || '');
-                        }
-                        catch {
-                            return el.textContent;
-                        }
-                    });
-                    break;
-                case 'table':
-                    output = await element.evaluate((table) => {
-                        const rows = table.querySelectorAll('tr');
-                        return Array.from(rows).map((row) => {
-                            const cells = row.querySelectorAll('th, td');
-                            return Array.from(cells).map((c) => c.textContent);
+            // 检查匹配的元素数量
+            const elements = await element.all();
+            const elementCount = elements.length;
+            console.log(`[BrowserExecutor] Found ${elementCount} elements matching selector`);
+            // 自动处理多元素场景
+            if (elementCount > 1 && !multiple) {
+                // 多个元素但要求单元素 → 自动取第一个
+                console.log(`[BrowserExecutor] Multiple elements found (${elementCount}), but multiple=false. Using first element.`);
+                const firstElement = elements[0];
+                switch (type) {
+                    case 'text':
+                        output = await firstElement.textContent();
+                        break;
+                    case 'html':
+                        output = await firstElement.innerHTML();
+                        break;
+                    default:
+                        output = await firstElement.textContent();
+                }
+            }
+            else if (elementCount > 1 && multiple) {
+                // 多个元素且要求多元素 → 批量提取
+                switch (type) {
+                    case 'text':
+                        output = await element.allTextContents();
+                        break;
+                    case 'html':
+                        output = await element.allInnerHTMLs();
+                        break;
+                    default:
+                        output = await element.allTextContents();
+                }
+            }
+            else {
+                // 单个元素
+                switch (type) {
+                    case 'text':
+                        output = await element.textContent();
+                        break;
+                    case 'html':
+                        output = await element.innerHTML();
+                        break;
+                    case 'json':
+                        output = await element.evaluate((el) => {
+                            try {
+                                return JSON.parse(el.textContent || '');
+                            }
+                            catch {
+                                return el.textContent;
+                            }
                         });
-                    });
-                    break;
-                default:
-                    output = await element.textContent();
+                        break;
+                    case 'table':
+                        output = await element.evaluate((table) => {
+                            const rows = table.querySelectorAll('tr');
+                            return Array.from(rows).map((row) => {
+                                const cells = row.querySelectorAll('th, td');
+                                return Array.from(cells).map((c) => c.textContent);
+                            });
+                        });
+                        break;
+                    default:
+                        output = await element.textContent();
+                }
             }
             return {
                 success: true,
@@ -438,10 +480,10 @@ ${htmlSnippet}
             let screenshot;
             if (selector) {
                 const element = this.page.locator(selector);
-                screenshot = await element.screenshot({});
+                screenshot = (await element.screenshot({}));
             }
             else {
-                screenshot = await this.page.screenshot({ fullPage });
+                screenshot = (await this.page.screenshot({ fullPage }));
             }
             const base64 = screenshot.toString('base64');
             return {
@@ -530,14 +572,17 @@ ${htmlSnippet}
                         return `#${el.id}`;
                     let selector = el.tagName.toLowerCase();
                     if (el.className && typeof el.className === 'string') {
-                        const classes = el.className.trim().split(/\s+/).filter(c => c);
+                        const classes = el.className
+                            .trim()
+                            .split(/\s+/)
+                            .filter((c) => c);
                         if (classes.length > 0) {
                             selector += '.' + classes.slice(0, 2).join('.');
                         }
                     }
                     const parent = el.parentElement;
                     if (parent) {
-                        const siblings = Array.from(parent.children).filter(e => e.tagName === el.tagName);
+                        const siblings = Array.from(parent.children).filter((e) => e.tagName === el.tagName);
                         if (siblings.length > 1) {
                             const index = siblings.indexOf(el) + 1;
                             selector += `:nth-child(${index})`;
@@ -592,23 +637,31 @@ ${htmlSnippet}
                 const sortedLinks = [...links].sort((a, b) => {
                     const mainKeywords = ['feed', 'article', 'note', 'content', 'result', 'list', 'card'];
                     const excludeKeywords = [
-                        'sidebar', 'side-bar', 'channel', 'nav', 'header',
-                        'footer', 'user', 'profile', 'guide', 'tab'
+                        'sidebar',
+                        'side-bar',
+                        'channel',
+                        'nav',
+                        'header',
+                        'footer',
+                        'user',
+                        'profile',
+                        'guide',
+                        'tab',
                     ];
                     const aParent = (a.parentContext || '').toLowerCase();
                     const bParent = (b.parentContext || '').toLowerCase();
                     const aSelector = (a.selector || '').toLowerCase();
                     const bSelector = (b.selector || '').toLowerCase();
                     // 第一步：排除侧边栏/导航元素（同时检查 parentContext 和 selector）
-                    const aIsExcluded = excludeKeywords.some(k => aParent.includes(k) || aSelector.includes(k));
-                    const bIsExcluded = excludeKeywords.some(k => bParent.includes(k) || bSelector.includes(k));
+                    const aIsExcluded = excludeKeywords.some((k) => aParent.includes(k) || aSelector.includes(k));
+                    const bIsExcluded = excludeKeywords.some((k) => bParent.includes(k) || bSelector.includes(k));
                     if (aIsExcluded && !bIsExcluded)
                         return 1; // 侧边栏排后面
                     if (!aIsExcluded && bIsExcluded)
                         return -1; // 主要内容排前面
                     // 第二步：在主要内容中找包含关键词的
-                    const aIsMain = mainKeywords.some(k => aParent.includes(k) || aSelector.includes(k));
-                    const bIsMain = mainKeywords.some(k => bParent.includes(k) || bSelector.includes(k));
+                    const aIsMain = mainKeywords.some((k) => aParent.includes(k) || aSelector.includes(k));
+                    const bIsMain = mainKeywords.some((k) => bParent.includes(k) || bSelector.includes(k));
                     if (aIsMain && !bIsMain)
                         return -1;
                     if (!aIsMain && bIsMain)
@@ -617,28 +670,33 @@ ${htmlSnippet}
                     return a.index - b.index;
                 });
                 const mainContainers = Array.from(document.querySelectorAll('div[class]'))
-                    .filter(el => {
+                    .filter((el) => {
                     const className = el.className.toLowerCase();
                     const id = (el.id || '').toLowerCase();
                     // 排除侧边栏、导航栏等非主要内容区
-                    if (className.includes('sidebar') || className.includes('side-bar') ||
-                        className.includes('channel') || className.includes('nav') ||
-                        className.includes('header') || className.includes('footer') ||
-                        id.includes('sidebar') || id.includes('channel') || id.includes('nav')) {
+                    if (className.includes('sidebar') ||
+                        className.includes('side-bar') ||
+                        className.includes('channel') ||
+                        className.includes('nav') ||
+                        className.includes('header') ||
+                        className.includes('footer') ||
+                        id.includes('sidebar') ||
+                        id.includes('channel') ||
+                        id.includes('nav')) {
                         return false;
                     }
                     // 匹配主要内容区
-                    return className.includes('feed') ||
+                    return (className.includes('feed') ||
                         className.includes('article') ||
                         className.includes('list') ||
                         className.includes('content') ||
                         className.includes('card') ||
                         className.includes('result') ||
-                        className.includes('note');
+                        className.includes('note'));
                 })
                     .sort((a, b) => b.children.length - a.children.length)
                     .slice(0, 10)
-                    .map(el => ({
+                    .map((el) => ({
                     selector: getUniqueSelector(el),
                     childCount: el.children.length,
                 }));
@@ -673,11 +731,17 @@ ${htmlSnippet}
         try {
             const result = await this.page.evaluate(() => {
                 const popupSelectors = [
-                    '[class*="login-popup"]', '[class*="login-modal"]',
-                    '[class*="login-dialog"]', '[class*="login-mask"]',
-                    '[class*="qrcode-login"]', '[class*="wechat-login"]',
-                    '[class*="login-tip"]', '[class*="login-required"]',
-                    '.mask', '[class*="overlay"]', '[class*="popup"]',
+                    '[class*="login-popup"]',
+                    '[class*="login-modal"]',
+                    '[class*="login-dialog"]',
+                    '[class*="login-mask"]',
+                    '[class*="qrcode-login"]',
+                    '[class*="wechat-login"]',
+                    '[class*="login-tip"]',
+                    '[class*="login-required"]',
+                    '.mask',
+                    '[class*="overlay"]',
+                    '[class*="popup"]',
                 ];
                 for (const selector of popupSelectors) {
                     const el = document.querySelector(selector);
