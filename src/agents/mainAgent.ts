@@ -1,20 +1,19 @@
 /**
  * Main Agent - LangGraph ReAct 主 Agent
  * 负责任务理解、分发、结果汇总
- *
- * 注意：此文件为 v0.4 架构占位符
- * 实际集成需要与现有 TaskEngine、BrowserExecutor 等模块对接
  */
 
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { ChatOpenAI } from '@langchain/openai';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
+import { getCheckpointer, AgentCheckpointer } from '../checkpointers/agentCheckpointer';
 
 export interface AgentConfig {
   modelName?: string;
   temperature?: number;
   threadId?: string;
+  checkpointerEnabled?: boolean;
 }
 
 export interface AgentResult {
@@ -32,13 +31,7 @@ const browserTool = tool(
   },
   {
     name: 'browser',
-    description: `浏览器操作工具，支持以下操作：
-- goto: 导航到指定 URL
-- click: 点击页面元素
-- input: 在输入框中输入文本
-- wait: 等待元素出现
-- extract: 提取页面内容
-- screenshot: 截取当前页面截图`,
+    description: '浏览器操作工具，支持 goto/click/input/wait/extract/screenshot',
     schema: z.object({
       action: z.enum(['goto', 'click', 'input', 'wait', 'extract', 'screenshot']),
       url: z.string().optional(),
@@ -56,7 +49,7 @@ const cliTool = tool(
   },
   {
     name: 'cli',
-    description: '系统命令执行工具，用于执行白名单内的系统命令',
+    description: '系统命令执行工具',
     schema: z.object({
       command: z.string(),
       args: z.array(z.string()).optional(),
@@ -72,7 +65,7 @@ const visionTool = tool(
   },
   {
     name: 'vision',
-    description: '视觉处理工具，用于分析图片和屏幕内容',
+    description: '视觉处理工具',
     schema: z.object({
       action: z.enum(['ocr', 'analyze', 'screenshot']),
       target: z.string().optional(),
@@ -88,7 +81,7 @@ const plannerTool = tool(
   },
   {
     name: 'planner',
-    description: '任务规划工具，用于分析和规划复杂任务',
+    description: '任务规划工具',
     schema: z.object({
       task: z.string(),
       context: z.string().optional(),
@@ -96,32 +89,9 @@ const plannerTool = tool(
   }
 );
 
-// 可用工具列表
 const availableTools = [browserTool, cliTool, visionTool, plannerTool];
 
-export class MainAgent {
-  private agent: any;
-  private config: AgentConfig;
-  private threadId: string;
-  private model: ChatOpenAI;
-
-  constructor(config: AgentConfig = {}) {
-    this.config = {
-      modelName: config.modelName || 'gpt-4-turbo',
-      temperature: config.temperature || 0,
-    };
-    this.threadId = config.threadId || `thread-${Date.now()}`;
-    this.model = new ChatOpenAI({
-      model: this.config.modelName,
-      temperature: this.config.temperature,
-    });
-  }
-
-  async initialize(): Promise<void> {
-    this.agent = createReactAgent({
-      llm: this.model,
-      tools: availableTools,
-      stateModifier: `你是一个浏览器自动化助手，擅长理解用户任务并分解执行。
+const STATE_MODIFIER = `你是一个浏览器自动化助手，擅长理解用户任务并分解执行。
 
 可用工具：
 1. browser - 用于浏览器操作（打开网页、点击、输入、提取内容）
@@ -130,10 +100,39 @@ export class MainAgent {
 4. planner - 用于分析和规划复杂任务
 
 根据用户任务，选择合适的工具来完成任务。
-如果任务需要多个步骤，请按顺序执行。`,
+如果任务需要多个步骤，请按顺序执行。`;
+
+export class MainAgent {
+  private agent: any;
+  private config: AgentConfig;
+  private threadId: string;
+  private model: ChatOpenAI;
+  private checkpointer: AgentCheckpointer;
+  private checkpointerEnabled: boolean;
+
+  constructor(config: AgentConfig = {}) {
+    this.config = {
+      modelName: config.modelName || 'gpt-4-turbo',
+      temperature: config.temperature || 0,
+      checkpointerEnabled: config.checkpointerEnabled !== false,
+    };
+    this.threadId = config.threadId || `thread-${Date.now()}`;
+    this.model = new ChatOpenAI({
+      model: this.config.modelName,
+      temperature: this.config.temperature,
+    });
+    this.checkpointer = getCheckpointer({ type: 'memory' });
+    this.checkpointerEnabled = this.config.checkpointerEnabled ?? true;
+  }
+
+  async initialize(): Promise<void> {
+    this.agent = createReactAgent({
+      llm: this.model,
+      tools: availableTools,
+      stateModifier: STATE_MODIFIER,
     });
 
-    console.log('[MainAgent] Initialized with thread:', this.threadId);
+    console.log('[MainAgent] Initialized, thread:', this.threadId);
   }
 
   async run(task: string): Promise<AgentResult> {
@@ -170,6 +169,10 @@ export class MainAgent {
 
   getThreadId(): string {
     return this.threadId;
+  }
+
+  isCheckpointerEnabled(): boolean {
+    return this.checkpointerEnabled;
   }
 }
 
