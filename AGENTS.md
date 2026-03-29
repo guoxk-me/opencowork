@@ -277,7 +277,7 @@ git rebase origin/main
 
 ### Docs Directory
 
-Documentation files are located in: `/home/gaohaining/opencowork/docs/`
+Documentation files are located in: `./docs/`
 
 Key documents:
 
