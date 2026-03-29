@@ -59,54 +59,50 @@
 | **验证**     | Verifier 手动             | Graph State Validation     |
 | **可观测**   | console.log 手动          | LangSmith 集成             |
 
-### 2.2 LangGraph 架构图
+### 2.2 LangGraph 主-子 Agent 架构图
 
 ```
 User Task
     ↓
-┌─────────────────────────────────────────────┐
-│           LangGraph Agent                   │
-│  ┌─────────────┐   ┌─────────────┐          │
-│  │   Planner   │ → │  Executor   │          │
-│  │   Node      │   │   Node      │          │
-│  └──────┬──────┘   └──────┬──────┘          │
-│         │                 │                 │
-│         ↓                 ↓                 │
-│  ┌─────────────┐   ┌─────────────┐          │
-│  │   Verifier  │ → │   Memory    │          │
-│  │   Node      │   │   Node      │          │
-│  └─────────────┘   └─────────────┘          │
-└─────────────────────────────────────────────┘
-         ↓                 ↓
-┌─────────────────────────────────────────────┐
-│           LangGraph Runtime                  │
-│  - StateSchema (状态定义)                    │
-│  - Checkpointer (持久化)                    │
-│  - Memory Store (记忆)                      │
-│  - Tools (browser/cli/vision)               │
-└─────────────────────────────────────────────┘
+┌───────────────────────────────────────────────┐
+│         Main Agent (ReAct)                   │
+│                                               │
+│   Tools (子Agent as Tool):                    │
+│   ┌──────────────┐  ┌──────────────┐         │
+│   │ Browser      │  │ Planner      │         │
+│   │ SubAgent    │  │ SubAgent    │         │
+│   │ (StateGraph)│  │ (StateGraph)│         │
+│   └──────────────┘  └──────────────┘         │
+│   ┌──────────────┐  ┌──────────────┐         │
+│   │ CLI          │  │ Vision       │         │
+│   │ SubAgent    │  │ SubAgent    │         │
+│   │ (StateGraph)│  │ (StateGraph)│         │
+│   └──────────────┘  └──────────────┘         │
+└───────────────────────────────────────────────┘
     ↓
 Web Page / CLI / Vision
 ```
 
 ### 2.3 核心原则
 
-**原则1: 使用 LangGraph 作为执行框架**
+**原则1: 主-子 Agent 架构**
 
-- 不再自定义状态机和执行循环
-- 使用 StateGraph 定义节点和边
-- 内置 checkpoint 持久化
+- 主 Agent (Main Agent): 使用 `createReactAgent`，负责任务理解、分发、结果汇总
+- 子 Agent (SubAgent): 每个子 Agent 是独立的 StateGraph，精细控制特定领域操作
+- 子 Agent 通过 LangChain Tool 接口暴露给主 Agent 调用
 
-**原则2: Tool 封装现有执行器**
+**原则2: Tool 封装 SubAgent**
 
-- BrowserExecutor → browserTool
-- CLIExecutor → cliTool
-- VisionExecutor → visionTool
+- BrowserExecutor → BrowserSubAgent (StateGraph)
+- CLIExecutor → CLISubAgent (StateGraph)
+- VisionExecutor → VisionSubAgent (StateGraph)
+- TaskPlanner → PlannerSubAgent (StateGraph)
 
-**原则3: Agent 负责决策**
+**原则3: ReAct 决策 + StateGraph 执行**
 
-- 使用 createReactAgent 或自定义 Agent
-- LLM 决定使用哪个 Tool
+- 主 Agent 使用 ReAct 模式，LLM 决定使用哪个子 Agent
+- 子 Agent 内部使用 StateGraph 精细控制执行步骤
+- 后续可轻松添加新子 Agent
 - 不再手动规划步骤序列
 
 ---
@@ -118,8 +114,8 @@ Web Page / CLI / Vision
 ```typescript
 // src/states/agentState.ts
 
-import { StateSchema, MessagesValue } from "@langchain/langgraph";
-import { z } from "zod";
+import { StateSchema, MessagesValue } from '@langchain/langgraph';
+import { z } from 'zod';
 
 export const AgentState = new StateSchema({
   // 任务描述
@@ -136,14 +132,14 @@ export const AgentState = new StateSchema({
           id: z.string(),
           type: z.string(),
           action: z.any(),
-        }),
+        })
       ),
       edges: z.array(
         z.object({
           from: z.string(),
           to: z.string(),
           type: z.string(),
-        }),
+        })
       ),
     })
     .optional(),
@@ -200,9 +196,9 @@ export const AgentState = new StateSchema({
 ```typescript
 // src/nodes/plannerNode.ts
 
-import { GraphNode } from "@langchain/langgraph";
-import { AgentState } from "../states/agentState";
-import { z } from "zod";
+import { GraphNode } from '@langchain/langgraph';
+import { AgentState } from '../states/agentState';
+import { z } from 'zod';
 
 const PlanInput = z.object({
   task: z.string(),
@@ -215,10 +211,7 @@ const PlanInput = z.object({
     .optional(),
 });
 
-export const plannerNode: GraphNode<typeof AgentState> = async (
-  state,
-  config,
-) => {
+export const plannerNode: GraphNode<typeof AgentState> = async (state, config) => {
   const { task } = state;
   const context = state.pageContext || {};
 
@@ -226,11 +219,11 @@ export const plannerNode: GraphNode<typeof AgentState> = async (
   const llm = getLLMClient();
   const response = await llm.chat([
     {
-      role: "system",
+      role: 'system',
       content: PLANNER_SYSTEM_PROMPT,
     },
     {
-      role: "user",
+      role: 'user',
       content: `任务: ${task}\n当前页面: ${context.url}\n标题: ${context.title}`,
     },
   ]);
@@ -249,20 +242,17 @@ export const plannerNode: GraphNode<typeof AgentState> = async (
 ```typescript
 // src/nodes/executorNode.ts
 
-import { GraphNode } from "@langchain/langgraph";
-import { AgentState } from "../states/agentState";
+import { GraphNode } from '@langchain/langgraph';
+import { AgentState } from '../states/agentState';
 
-export const executorNode: GraphNode<typeof AgentState> = async (
-  state,
-  config,
-) => {
+export const executorNode: GraphNode<typeof AgentState> = async (state, config) => {
   const { plan, currentStep } = state;
 
   if (!plan || !plan.nodes || plan.nodes.length === 0) {
     return {
       result: {
         success: false,
-        error: { code: "NO_PLAN", message: "No plan to execute" },
+        error: { code: 'NO_PLAN', message: 'No plan to execute' },
       },
     };
   }
@@ -289,21 +279,18 @@ export const executorNode: GraphNode<typeof AgentState> = async (
 ```typescript
 // src/nodes/verifyNode.ts
 
-import { GraphNode } from "@langchain/langgraph";
-import { AgentState } from "../states/agentState";
+import { GraphNode } from '@langchain/langgraph';
+import { AgentState } from '../states/agentState';
 
-export const verifyNode: GraphNode<typeof AgentState> = async (
-  state,
-  config,
-) => {
+export const verifyNode: GraphNode<typeof AgentState> = async (state, config) => {
   const { result, plan, currentStep } = state;
 
   if (!result) {
     return {
       verification: {
         verified: false,
-        type: "no_result",
-        message: "No result to verify",
+        type: 'no_result',
+        message: 'No result to verify',
       },
     };
   }
@@ -315,16 +302,16 @@ export const verifyNode: GraphNode<typeof AgentState> = async (
     return {
       verification: {
         verified: true,
-        type: "success",
-        message: "Action verified successfully",
+        type: 'success',
+        message: 'Action verified successfully',
       },
     };
   } else {
     return {
       verification: {
         verified: false,
-        type: "failed",
-        message: result.error?.message || "Action verification failed",
+        type: 'failed',
+        message: result.error?.message || 'Action verification failed',
       },
       retryCount: (state.retryCount || 0) + 1,
     };
@@ -349,13 +336,10 @@ function verifyResult(result: any, plan: any, step: number): boolean {
 ```typescript
 // src/nodes/memoryNode.ts
 
-import { GraphNode } from "@langchain/langgraph";
-import { AgentState } from "../states/agentState";
+import { GraphNode } from '@langchain/langgraph';
+import { AgentState } from '../states/agentState';
 
-export const memoryNode: GraphNode<typeof AgentState> = async (
-  state,
-  config,
-) => {
+export const memoryNode: GraphNode<typeof AgentState> = async (state, config) => {
   const { result, task, pageContext } = state;
 
   // 记录到 Memory Store
@@ -382,19 +366,11 @@ export const memoryNode: GraphNode<typeof AgentState> = async (
 ```typescript
 // src/tools/browserTool.ts
 
-import { tool } from "@langchain/core/tools";
-import { z } from "zod";
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 
 const BrowserParams = z.object({
-  action: z.enum([
-    "goto",
-    "click",
-    "input",
-    "wait",
-    "extract",
-    "screenshot",
-    "evaluate",
-  ]),
+  action: z.enum(['goto', 'click', 'input', 'wait', 'extract', 'screenshot', 'evaluate']),
   selector: z.string().optional(),
   text: z.string().optional(),
   url: z.string().optional(),
@@ -410,31 +386,31 @@ export const browserTool = tool(
     const browser = getBrowserFromConfig(config);
 
     switch (action) {
-      case "goto":
+      case 'goto':
         await browser.goto(url, { timeout: timeout || 30000 });
         return { success: true, url: browser.url() };
 
-      case "click":
+      case 'click':
         await browser.click(selector, { timeout: timeout || 10000 });
         return { success: true };
 
-      case "input":
+      case 'input':
         await browser.type(selector, text, { timeout: timeout || 10000 });
         return { success: true };
 
-      case "wait":
+      case 'wait':
         await browser.waitForSelector(selector, { timeout: timeout || 10000 });
         return { success: true };
 
-      case "extract":
+      case 'extract':
         const content = await browser.extract(selector);
         return { success: true, content };
 
-      case "screenshot":
+      case 'screenshot':
         const screenshot = await browser.screenshot();
         return { success: true, screenshot };
 
-      case "evaluate":
+      case 'evaluate':
         const evalResult = await browser.evaluate(selector);
         return { success: true, result: evalResult };
 
@@ -443,7 +419,7 @@ export const browserTool = tool(
     }
   },
   {
-    name: "browser",
+    name: 'browser',
     description: `浏览器操作工具，允许 AI 执行以下操作：
 - goto: 导航到指定 URL
 - click: 点击页面元素
@@ -455,7 +431,7 @@ export const browserTool = tool(
 
 使用此工具完成网页自动化任务。`,
     schema: BrowserParams,
-  },
+  }
 );
 ```
 
@@ -464,13 +440,13 @@ export const browserTool = tool(
 ```typescript
 // src/tools/cliTool.ts
 
-import { tool } from "@langchain/core/tools";
-import { z } from "zod";
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 
 const CLIParams = z.object({
-  command: z.string().describe("要执行的命令"),
-  args: z.array(z.string()).optional().describe("命令参数"),
-  timeout: z.number().optional().describe("超时时间(毫秒)"),
+  command: z.string().describe('要执行的命令'),
+  args: z.array(z.string()).optional().describe('命令参数'),
+  timeout: z.number().optional().describe('超时时间(毫秒)'),
 });
 
 export const cliTool = tool(
@@ -492,7 +468,7 @@ export const cliTool = tool(
     return result;
   },
   {
-    name: "cli",
+    name: 'cli',
     description: `系统命令执行工具，用于执行白名单内的系统命令。
     
 允许的命令示例：
@@ -502,7 +478,7 @@ export const cliTool = tool(
 
 使用此工具完成文件操作和开发任务。`,
     schema: CLIParams,
-  },
+  }
 );
 ```
 
@@ -511,34 +487,34 @@ export const cliTool = tool(
 ```typescript
 // src/tools/visionTool.ts
 
-import { tool } from "@langchain/core/tools";
-import { z } from "zod";
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 
 const VisionParams = z.object({
-  action: z.enum(["ocr", "analyze", "extract_text", "describe"]),
-  image_path: z.string().describe("图片路径或 URL"),
-  prompt: z.string().optional().describe("分析提示"),
-  language: z.string().optional().describe("输出语言"),
+  action: z.enum(['ocr', 'analyze', 'extract_text', 'describe']),
+  image_path: z.string().describe('图片路径或 URL'),
+  prompt: z.string().optional().describe('分析提示'),
+  language: z.string().optional().describe('输出语言'),
 });
 
 export const visionTool = tool(
   async (params, config) => {
-    const { action, image_path, prompt, language = "zh-CN" } = params;
+    const { action, image_path, prompt, language = 'zh-CN' } = params;
 
     switch (action) {
-      case "ocr":
+      case 'ocr':
         const text = await performOCR(image_path);
         return { success: true, text };
 
-      case "analyze":
+      case 'analyze':
         const analysis = await analyzeImage(image_path, prompt);
         return { success: true, analysis };
 
-      case "extract_text":
+      case 'extract_text':
         const extracted = await extractTextFromImage(image_path);
         return { success: true, text: extracted };
 
-      case "describe":
+      case 'describe':
         const description = await describeImage(image_path);
         return { success: true, description };
 
@@ -547,7 +523,7 @@ export const visionTool = tool(
     }
   },
   {
-    name: "vision",
+    name: 'vision',
     description: `视觉处理工具，用于分析图片和屏幕内容。
     
 支持的操作：
@@ -558,18 +534,193 @@ export const visionTool = tool(
 
 适用于截图分析、验证码识别等场景。`,
     schema: VisionParams,
-  },
+  }
 );
 ```
 
-### 3.4 Checkpointer 设计
+### 3.4 主 Agent 设计
+
+```typescript
+// src/agents/mainAgent.ts
+
+import { createReactAgent } from 'langchain';
+import { ChatOpenAI } from '@langchain/openai';
+import { browserTool } from '../tools/browserTool';
+import { cliTool } from '../tools/cliTool';
+import { visionTool } from '../tools/visionTool';
+import { plannerTool } from '../tools/plannerTool';
+import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
+
+// 定义 LLM
+const model = new ChatOpenAI({
+  model: 'gpt-4-turbo',
+  temperature: 0,
+});
+
+// 创建主 Agent
+export const mainAgent = createReactAgent({
+  llm: model,
+  tools: [browserTool, cliTool, visionTool, plannerTool],
+  stateModifier: `你是一个浏览器自动化助手，擅长理解用户任务并分解执行。
+  
+你有两个子 Agent 可用：
+1. browser - 用于浏览器操作（打开网页、点击、输入、提取内容）
+2. cli - 用于执行系统命令
+3. vision - 用于分析图片和屏幕内容
+4. planner - 用于分析和规划复杂任务
+
+根据用户任务，选择合适的子 Agent 来完成。`,
+});
+
+// 配置 Checkpointer 实现持久化
+const checkpointer = new SqliteSaver({
+  connectionPath: './checkpoints.db',
+});
+
+// 编译带持久化的 Agent
+export const agentWithCheckpoint = mainAgent.compile({
+  checkpointer,
+  configurable: {
+    thread_id: 'user-session-1',
+  },
+});
+
+// 使用示例
+async function runTask(task: string) {
+  const result = await agentWithCheckpoint.invoke(
+    { messages: [{ role: 'user', content: task }] },
+    { configurable: { thread_id: 'session-123' } }
+  );
+  return result;
+}
+```
+
+### 3.5 子 Agent 基类设计
+
+```typescript
+// src/agents/subagents/baseSubAgent.ts
+
+import { StateGraph, START, END } from '@langchain/langgraph';
+import { z } from 'zod';
+
+// 子 Agent 基础状态
+export const BaseSubAgentState = new StateSchema({
+  input: z.string(),
+  output: z.any().optional(),
+  error: z.string().optional(),
+  step: z.number().default(0),
+});
+
+// 子 Agent 基类
+export abstract class BaseSubAgent<T extends z.ZodType> {
+  protected graph: StateGraph<T>;
+  protected name: string;
+
+  constructor(name: string, stateSchema: T) {
+    this.name = name;
+    this.graph = new StateGraph(stateSchema);
+  }
+
+  // 子类实现具体节点
+  protected abstract addNodes(): void;
+
+  // 编译子 Agent
+  compile(checkpointer?: any) {
+    this.addNodes();
+    return this.graph.compile({ checkpointer });
+  }
+
+  // 转换为 Tool
+  asTool() {
+    return tool(
+      async (input: string) => {
+        const compiled = this.compile();
+        const result = await compiled.invoke({ input });
+        return result.output;
+      },
+      {
+        name: this.name,
+        description: this.getDescription(),
+        schema: z.object({ input: z.string() }),
+      }
+    );
+  }
+
+  protected abstract getDescription(): string;
+}
+```
+
+### 3.6 Browser SubAgent 设计 (StateGraph)
+
+```typescript
+// src/agents/subagents/browserSubAgent.ts
+
+import { StateGraph, START, END } from '@langchain/langgraph';
+import { z } from 'zod';
+
+// Browser SubAgent 状态
+const BrowserState = new StateSchema({
+  action: z.enum(['goto', 'click', 'input', 'wait', 'extract']),
+  params: z.any(),
+  result: z.any().optional(),
+  error: z.string().optional(),
+});
+
+// 定义节点
+const prepareNode = (state: typeof BrowserState.Type) => ({
+  ...state,
+  error: undefined,
+});
+
+const executeNode = async (state: typeof BrowserState.Type) => {
+  // 执行浏览器操作
+  const result = await executeBrowserAction(state.action, state.params);
+  return { result };
+};
+
+const errorNode = (state: typeof BrowserState.Type) => ({
+  error: `Browser action failed: ${state.action}`,
+});
+
+// 构建 Graph
+const workflow = new StateGraph(BrowserState)
+  .addNode('prepare', prepareNode)
+  .addNode('execute', executeNode)
+  .addNode('error', errorNode)
+  .addEdge(START, 'prepare')
+  .addEdge('prepare', 'execute')
+  .addEdge('execute', END);
+
+// 编译
+export const browserSubAgent = workflow.compile();
+
+// 转换为 Tool 供主 Agent 调用
+import { tool } from '@langchain/core/tools';
+
+export const browserTool = tool(
+  async ({ action, params }) => {
+    const result = await browserSubAgent.invoke({ action, params });
+    return result.result;
+  },
+  {
+    name: 'browser',
+    description: '浏览器操作子 Agent，用于执行网页自动化任务',
+    schema: z.object({
+      action: z.enum(['goto', 'click', 'input', 'wait', 'extract']),
+      params: z.any(),
+    }),
+  }
+);
+```
+
+### 3.7 Checkpointer 设计
 
 ```typescript
 // src/checkpointers/sqlite.ts
 
-import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
+import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite';
 
-export function createSqliteCheckpointer(dbPath: string = "./checkpoints.db") {
+export function createSqliteCheckpointer(dbPath: string = './checkpoints.db') {
   return new SqliteSaver({
     connectionPath: dbPath,
   });
@@ -581,7 +732,7 @@ const checkpointer = createSqliteCheckpointer();
 const agent = workflow.compile({
   checkpointer,
   configurable: {
-    thread_id: "user-session-1",
+    thread_id: 'user-session-1',
   },
 });
 ```
@@ -591,8 +742,8 @@ const agent = workflow.compile({
 ```typescript
 // src/memory/agentMemory.ts
 
-import { MemoryStore, InMemoryStore } from "@langchain/langgraph";
-import { z } from "zod";
+import { MemoryStore, InMemoryStore } from '@langchain/langgraph';
+import { z } from 'zod';
 
 const MemorySchema = z.object({
   task: z.string(),
@@ -616,7 +767,7 @@ export class AgentMemory {
     context?: {
       url?: string;
       tags?: string[];
-    },
+    }
   ) {
     const memory = {
       task,
@@ -626,17 +777,17 @@ export class AgentMemory {
       tags: context?.tags,
     };
 
-    await this.store.put(["memories"], `task_${Date.now()}`, memory);
+    await this.store.put(['memories'], `task_${Date.now()}`, memory);
   }
 
   // 搜索相关记忆
   async search(query: string, limit: number = 5) {
-    return await this.store.search(["memories"], { query, limit });
+    return await this.store.search(['memories'], { query, limit });
   }
 
   // 获取最近记忆
   async getRecent(limit: number = 10) {
-    const memories = await this.store.search(["memories"], { limit });
+    const memories = await this.store.search(['memories'], { limit });
 
     return memories.map((m) => m.value);
   }
@@ -658,9 +809,9 @@ src/memory/shortTermMemory.ts           # 替换为 Memory Store
 src/browser/uiGraph.ts                  # LangGraph 管理
 src/browser/observer.ts                 # LangGraph 管理
 src/executor/verifier.ts                # 迁移到 State Validation
-src/core/executor/BrowserExecutor.ts    # 封装为 Tool
-src/core/executor/CLIExecutor.ts        # 封装为 Tool
-src/core/executor/VisionExecutor.ts     # 封装为 Tool
+src/core/executor/BrowserExecutor.ts    # 封装为 SubAgent
+src/core/executor/CLIExecutor.ts        # 封装为 SubAgent
+src/core/executor/VisionExecutor.ts     # 封装为 SubAgent
 ```
 
 ### 4.2 新增的文件
@@ -668,19 +819,19 @@ src/core/executor/VisionExecutor.ts     # 封装为 Tool
 ```
 src/
 ├── agents/
-│   ├── graphAgent.ts          # LangGraph StateGraph 定义
-│   └── reactAgent.ts          # ReAct Agent 定义
-│
-├── nodes/
-│   ├── plannerNode.ts         # 规划节点
-│   ├── executorNode.ts        # 执行节点
-│   ├── verifyNode.ts          # 验证节点
-│   └── memoryNode.ts          # 记忆节点
+│   ├── mainAgent.ts           # 主 Agent (ReAct)
+│   └── subagents/
+│       ├── baseSubAgent.ts    # 子 Agent 基类
+│       ├── browserSubAgent.ts # 浏览器子 Agent (StateGraph)
+│       ├── plannerSubAgent.ts # 规划子 Agent (StateGraph)
+│       ├── cliSubAgent.ts     # CLI 子 Agent (StateGraph)
+│       └── visionSubAgent.ts  # Vision 子 Agent (StateGraph)
 │
 ├── tools/
-│   ├── browserTool.ts         # 浏览器工具
-│   ├── cliTool.ts             # CLI 工具
-│   └── visionTool.ts          # Vision 工具
+│   ├── browserTool.ts         # 浏览器工具 (封装 BrowserSubAgent)
+│   ├── cliTool.ts             # CLI 工具 (封装 CLISubAgent)
+│   ├── visionTool.ts          # Vision 工具 (封装 VisionSubAgent)
+│   └── plannerTool.ts         # 规划工具 (封装 PlannerSubAgent)
 │
 ├── checkpointers/
 │   └── sqlite.ts              # SQLite Checkpointer
@@ -691,8 +842,11 @@ src/
 ├── states/
 │   └── agentState.ts          # StateSchema 定义
 │
-└── config/
-    └── langchain.ts           # LangChain 配置
+├── config/
+│   └── langchain.ts           # LangChain 配置
+│
+└── utils/
+    └── logger.ts              # 日志工具 (LangSmith 替代)
 ```
 
 ### 4.3 修改的文件
@@ -703,35 +857,62 @@ src/renderer/App.tsx           # 适配新执行模式
 package.json                   # 添加 LangChain 依赖
 ```
 
+### 4.4 主-子 Agent 调用关系
+
+```
+Main Agent (ReAct)
+    │
+    ├── Tool: browserTool → BrowserSubAgent (StateGraph)
+    │   └── Nodes: navigate → click → input → extract
+    │
+    ├── Tool: cliTool → CLISubAgent (StateGraph)
+    │   └── Nodes: validate → execute → output
+    │
+    ├── Tool: visionTool → VisionSubAgent (StateGraph)
+    │   └── Nodes: capture → analyze → result
+    │
+    └── Tool: plannerTool → PlannerSubAgent (StateGraph)
+        └── Nodes: analyze → decompose → validate
+```
+
 ---
 
 ## 5. 实施计划
 
-### 5.1 详细时间线
+### 5.1 详细时间线 (12周)
 
-| 阶段        | 周次       | 任务                                     | 交付物                        |
-| ----------- | ---------- | ---------------------------------------- | ----------------------------- |
-| **Phase 1** | Week 1-2   | 项目初始化 + 依赖安装 + StateSchema 设计 | package.json, agentState.ts   |
-| **Phase 2** | Week 3-4   | Graph 搭建 + 基础 Nodes 实现             | graphAgent.ts, plannerNode.ts |
-| **Phase 3** | Week 5-6   | Tools 封装 (Browser/CLI)                 | browserTool.ts, cliTool.ts    |
-| **Phase 4** | Week 7-8   | Checkpointer 集成 + 任务持久化           | sqlite.ts, 任务可恢复         |
-| **Phase 5** | Week 9-10  | Memory Store + 记忆功能                  | agentMemory.ts                |
-| **Phase 6** | Week 11-12 | Vision Tool 封装                         | visionTool.ts                 |
-| **Phase 7** | Week 13-14 | LangSmith 集成 + 可观测性                | 调试能力                      |
-| **Phase 8** | Week 15-16 | 测试 + 优化 + 发布                       | v0.4 Release                  |
+| 阶段        | 周次       | 任务                              | 交付物                                                         |
+| ----------- | ---------- | --------------------------------- | -------------------------------------------------------------- |
+| **Phase 1** | Week 1-2   | 主 Agent 框架搭建 + Tool 接口定义 | mainAgent.ts, baseTool.ts                                      |
+| **Phase 2** | Week 3-4   | Browser SubAgent (StateGraph)     | browserSubAgent.ts, browserTool.ts                             |
+| **Phase 3** | Week 5-6   | Planner/CLI SubAgent              | plannerSubAgent.ts, cliSubAgent.ts, plannerTool.ts, cliTool.ts |
+| **Phase 4** | Week 7-8   | Vision SubAgent + Checkpointer    | visionSubAgent.ts, visionTool.ts, sqlite.ts, 任务持久化        |
+| **Phase 5** | Week 9-10  | Memory Store + Agent 间通信       | agentMemory.ts, 记忆功能                                       |
+| **Phase 6** | Week 11-12 | LangSmith 集成 + 测试 + 发布      | 可观测性, v0.4 Release                                         |
 
 ### 5.2 依赖包
 
 ```json
 {
   "dependencies": {
-    "@langchain/langgraph": "^0.0.50",
-    "@langchain/core": "^0.3.0",
-    "@langchain/openai": "^0.3.0",
-    "@langchain/langgraph-checkpoint-sqlite": "^0.0.1"
+    "@langchain/langgraph": "latest",
+    "@langchain/core": "latest",
+    "@langchain/openai": "latest",
+    "@langchain/langgraph-checkpoint-sqlite": "latest"
   }
 }
 ```
+
+### 5.3 里程碑
+
+| 里程碑 | 周次    | 目标                                       |
+| ------ | ------- | ------------------------------------------ |
+| **M1** | Week 2  | 主 Agent 可运行，理解任务并调用 Tools      |
+| **M2** | Week 4  | Browser SubAgent 完成，浏览器操作可执行    |
+| **M3** | Week 6  | Planner/CLI SubAgent 完成，任务可规划      |
+| **M4** | Week 8  | Vision SubAgent + Checkpointer，任务可恢复 |
+| **M5** | Week 10 | Memory Store，跨会话记忆可用               |
+| **M6** | Week 12 | v0.4 发布                                  |
 
 ---
 
