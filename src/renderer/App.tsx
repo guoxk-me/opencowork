@@ -1,12 +1,58 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Component, ReactNode } from 'react';
 import { ChatUI } from './components/ChatUI';
 import { ControlBar } from './components/ControlBar';
 import { TaskStatus } from './components/TaskStatus';
 import { TakeoverModal } from './components/TakeoverModal';
 import { AskUserDialog } from './components/AskUserDialog';
 import { SessionPanel } from './components/SessionPanel';
+import { HistoryPanel } from './components/HistoryPanel';
+import SchedulerPanel from './components/SchedulerPanel';
 import { useTaskStore } from './stores/taskStore';
 import { useSessionStore } from './stores/sessionStore';
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    console.error('[ErrorBoundary] Caught error:', error, errorInfo);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-background">
+          <div className="text-center p-8">
+            <div className="text-red-400 text-xl mb-4">Something went wrong</div>
+            <div className="text-text-muted text-sm mb-4">
+              {this.state.error?.message || 'An unexpected error occurred'}
+            </div>
+            <button onClick={() => window.location.reload()} className="btn btn-primary">
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 function App() {
   const {
@@ -171,81 +217,38 @@ function App() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-background">
-      {/* Header */}
-      <header className="h-12 flex items-center justify-between px-4 border-b border-border bg-surface">
-        <h1 className="text-lg font-semibold text-white">OpenCowork</h1>
-        <div className="text-sm text-text-muted">v0.2.0</div>
-      </header>
+    <ErrorBoundary>
+      <div className="h-screen flex flex-col bg-background">
+        {/* Header */}
+        <header className="h-12 flex items-center justify-between px-4 border-b border-border bg-surface">
+          <h1 className="text-lg font-semibold text-white">OpenCowork</h1>
+          <div className="text-sm text-text-muted">v0.2.0</div>
+        </header>
 
-      {/* Main content */}
-      <main className="flex-1 flex overflow-hidden">
-        {/* Session Panel */}
-        <SessionPanel />
+        {/* Main content */}
+        <main className="flex-1 flex overflow-hidden">
+          {/* Session Panel */}
+          <SessionPanel />
 
-        {/* Chat area */}
-        <div
-          className={`flex flex-col overflow-hidden ${previewMode === 'sidebar' ? 'flex-1' : 'w-full'}`}
-        >
-          {/* Task status */}
-          {task && <TaskStatus task={task} />}
-          <div className="flex-1 overflow-hidden">
-            <ChatUI />
-          </div>
-        </div>
-
-        {/* Sidebar Preview - only show in sidebar mode */}
-        {previewMode === 'sidebar' && (
-          <div className="w-[40%] border-l border-border bg-surface flex flex-col">
-            {/* Preview header with URL */}
-            <div className="h-12 flex items-center justify-between px-4 border-b border-border bg-elevated">
-              <div className="flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-primary"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-                  />
-                </svg>
-                {/* Debug: show previewMode status */}
-                <span className="text-sm text-text-secondary truncate max-w-[200px]">
-                  {task?.currentStep || (screenshot ? '正在预览...' : '等待任务执行...')}
-                </span>
-              </div>
-              <button
-                onClick={() => setPreviewMode('detached')}
-                className="p-1.5 rounded hover:bg-border text-text-muted hover:text-white"
-                title="打开独立窗口"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                  />
-                </svg>
-              </button>
+          {/* Chat area */}
+          <div
+            className={`flex flex-col overflow-hidden ${previewMode === 'sidebar' ? 'flex-1' : 'w-full'}`}
+          >
+            {/* Task status */}
+            {task && <TaskStatus task={task} />}
+            <div className="flex-1 overflow-hidden">
+              <ChatUI />
             </div>
-            {/* Preview content */}
-            <div className="flex-1 bg-background flex items-center justify-center p-2 overflow-hidden">
-              {screenshot ? (
-                <img
-                  key={imageKey}
-                  src={`data:image/jpeg;base64,${screenshot}`}
-                  alt="Browser Preview"
-                  className="w-full h-full object-contain rounded shadow"
-                />
-              ) : (
-                <div className="text-center text-text-muted">
+          </div>
+
+          {/* Sidebar Preview - only show in sidebar mode */}
+          {previewMode === 'sidebar' && (
+            <div className="w-[40%] border-l border-border bg-surface flex flex-col">
+              {/* Preview header with URL */}
+              <div className="h-12 flex items-center justify-between px-4 border-b border-border bg-elevated">
+                <div className="flex items-center gap-2">
                   <svg
-                    className="w-12 h-12 mx-auto mb-2 opacity-50"
+                    className="w-4 h-4 text-primary"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -253,35 +256,86 @@ function App() {
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                      strokeWidth={2}
+                      d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
                     />
                   </svg>
-                  <p className="text-sm">等待任务执行...</p>
+                  {/* Debug: show previewMode status */}
+                  <span className="text-sm text-text-secondary truncate max-w-[200px]">
+                    {task?.currentStep || (screenshot ? '正在预览...' : '等待任务执行...')}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setPreviewMode('detached')}
+                  className="p-1.5 rounded hover:bg-border text-text-muted hover:text-white"
+                  title="打开独立窗口"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                    />
+                  </svg>
+                </button>
+              </div>
+              {/* Preview content */}
+              <div className="flex-1 bg-background flex items-center justify-center p-2 overflow-hidden">
+                {screenshot ? (
+                  <img
+                    key={imageKey}
+                    src={`data:image/jpeg;base64,${screenshot}`}
+                    alt="Browser Preview"
+                    className="w-full h-full object-contain rounded shadow"
+                  />
+                ) : (
+                  <div className="text-center text-text-muted">
+                    <svg
+                      className="w-12 h-12 mx-auto mb-2 opacity-50"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                      />
+                    </svg>
+                    <p className="text-sm">等待任务执行...</p>
+                  </div>
+                )}
+              </div>
+              {/* Preview footer with current action */}
+              {task?.currentStep && (
+                <div className="h-8 px-4 border-t border-border bg-elevated flex items-center">
+                  <span className="text-xs text-text-muted font-mono truncate">
+                    {task.currentStep}
+                  </span>
                 </div>
               )}
             </div>
-            {/* Preview footer with current action */}
-            {task?.currentStep && (
-              <div className="h-8 px-4 border-t border-border bg-elevated flex items-center">
-                <span className="text-xs text-text-muted font-mono truncate">
-                  {task.currentStep}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </main>
+          )}
+        </main>
 
-      {/* Control bar */}
-      <ControlBar />
+        {/* Control bar */}
+        <ControlBar />
 
-      {/* Takeover modal */}
-      {isTakeover && <TakeoverModal />}
+        {/* Takeover modal */}
+        {isTakeover && <TakeoverModal />}
 
-      {/* Ask User Dialog */}
-      <AskUserDialog />
-    </div>
+        {/* Ask User Dialog */}
+        <AskUserDialog />
+
+        {/* History Panel */}
+        <HistoryPanel />
+
+        {/* Scheduler Panel */}
+        <SchedulerPanel />
+      </div>
+    </ErrorBoundary>
   );
 }
 

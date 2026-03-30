@@ -302,4 +302,45 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
       error: { code: 'NOT_IMPLEMENTED', message: 'Vision executor not yet implemented' },
     };
   },
+
+  // 定时任务相关 (v0.6)
+  'scheduler:list': async () => {
+    const { getScheduler } = await import('../scheduler/scheduler');
+    const scheduler = getScheduler();
+    return await scheduler.getAllTasks();
+  },
+
+  'scheduler:get': async (mainWindow, previewWindow, { id }: { id: string }) => {
+    const { getScheduler } = await import('../scheduler/scheduler');
+    const scheduler = getScheduler();
+    return await scheduler.getTask(id);
+  },
+
+  'scheduler:create': async (mainWindow, previewWindow, task) => {
+    const { getScheduler } = await import('../scheduler/scheduler');
+    const scheduler = getScheduler();
+    return await scheduler.addTask(task);
+  },
+
+  'scheduler:update': async (
+    mainWindow,
+    previewWindow,
+    { id, updates }: { id: string; updates: any }
+  ) => {
+    const { getScheduler } = await import('../scheduler/scheduler');
+    const scheduler = getScheduler();
+    return await scheduler.updateTask(id, updates);
+  },
+
+  'scheduler:delete': async (mainWindow, previewWindow, { id }: { id: string }) => {
+    const { getScheduler } = await import('../scheduler/scheduler');
+    const scheduler = getScheduler();
+    return await scheduler.deleteTask(id);
+  },
+
+  'scheduler:trigger': async (mainWindow, previewWindow, { id }: { id: string }) => {
+    const { getScheduler } = await import('../scheduler/scheduler');
+    const scheduler = getScheduler();
+    return await scheduler.triggerTask(id);
+  },
 };

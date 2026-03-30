@@ -1,0 +1,123 @@
+// src/scheduler/taskQueue.ts
+
+import { EventEmitter } from 'events';
+import { QueuedTask, TaskExecutionResult } from './types';
+
+export interface TaskQueueConfig {
+  maxConcurrent: number;
+  maxQueueSize: number;
+}
+
+const DEFAULT_CONFIG: TaskQueueConfig = {
+  maxConcurrent: 3,
+  maxQueueSize: 100,
+};
+
+export class TaskQueue extends EventEmitter {
+  private config: TaskQueueConfig;
+  private queue: QueuedTask[] = [];
+  private runningCount = 0;
+  private isProcessing = false;
+  private executor?: (task: QueuedTask) => Promise<TaskExecutionResult>;
+
+  constructor(config: Partial<TaskQueueConfig> = {}) {
+    super();
+    this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  setExecutor(executor: (task: QueuedTask) => Promise<TaskExecutionResult>): void {
+    this.executor = executor;
+  }
+
+  start(): void {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+    this.processQueue();
+  }
+
+  stop(): void {
+    this.isProcessing = false;
+  }
+
+  async enqueue(task: QueuedTask): Promise<void> {
+    if (this.queue.length >= this.config.maxQueueSize) {
+      console.warn('[TaskQueue] Queue full, rejecting task:', task.id);
+      throw new Error('Task queue is full');
+    }
+
+    const insertIndex = this.queue.findIndex((t) => t.priority > task.priority);
+    if (insertIndex === -1) {
+      this.queue.push(task);
+    } else {
+      this.queue.splice(insertIndex, 0, task);
+    }
+
+    console.log('[TaskQueue] Enqueued task:', task.scheduledTaskId, 'Priority:', task.priority);
+  }
+
+  dequeue(): QueuedTask | undefined {
+    return this.queue.shift();
+  }
+
+  size(): number {
+    return this.queue.length;
+  }
+
+  getRunningCount(): number {
+    return this.runningCount;
+  }
+
+  private async processQueue(): Promise<void> {
+    if (!this.isProcessing) return;
+
+    while (
+      this.isProcessing &&
+      this.runningCount < this.config.maxConcurrent &&
+      this.queue.length > 0 &&
+      this.executor
+    ) {
+      const task = this.peekNextExecutable();
+      if (!task) break;
+
+      this.runningCount++;
+      const dequeuedTask = this.dequeue();
+
+      if (dequeuedTask) {
+        this.executeTask(dequeuedTask).finally(() => {
+          this.runningCount--;
+          this.processQueue();
+        });
+      }
+    }
+
+    if (this.isProcessing) {
+      setTimeout(() => this.processQueue(), 100);
+    }
+  }
+
+  private peekNextExecutable(): QueuedTask | undefined {
+    const now = Date.now();
+    return this.queue.find((task) => task.executeAt <= now);
+  }
+
+  private async executeTask(task: QueuedTask): Promise<void> {
+    console.log('[TaskQueue] Executing task:', task.scheduledTaskId, 'Retry:', task.retryCount);
+
+    let result: TaskExecutionResult;
+    try {
+      if (this.executor) {
+        result = await this.executor(task);
+      } else {
+        throw new Error('No executor configured');
+      }
+
+      if (result.status === 'success') {
+        this.emit('task:completed', task, result);
+      } else {
+        this.emit('task:failed', task, new Error(result.error || 'Task failed'));
+      }
+    } catch (error) {
+      this.emit('task:failed', task, error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+}

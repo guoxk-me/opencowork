@@ -1,9 +1,13 @@
 import React from 'react';
 import { useTaskStore } from '../stores/taskStore';
+import { useHistoryStore } from '../stores/historyStore';
+import { useSchedulerStore } from '../stores/schedulerStore';
 
 export function ControlBar() {
   const { task, setTakeover, showPlanViewer, setShowPlanViewer, previewMode, setPreviewMode } =
     useTaskStore();
+  const { setIsOpen: setHistoryOpen } = useHistoryStore();
+  const { setOpen: setSchedulerOpen } = useSchedulerStore();
 
   const handleTakeover = () => {
     setTakeover(true);
@@ -127,6 +131,18 @@ export function ControlBar() {
             </svg>
           </button>
         </div>
+
+        <button onClick={() => setHistoryOpen(true)} className="btn btn-secondary" title="任务历史">
+          历史
+        </button>
+
+        <button
+          onClick={() => setSchedulerOpen(true)}
+          className="btn btn-secondary"
+          title="定时任务"
+        >
+          定时
+        </button>
 
         <button
           onClick={() => setShowPlanViewer(!showPlanViewer)}

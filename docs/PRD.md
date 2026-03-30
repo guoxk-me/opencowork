@@ -1,13 +1,13 @@
 # OpenCowork 产品需求文档 (PRD)
 
-| 项目     | 内容                                                     |
-| -------- | -------------------------------------------------------- |
-| 产品名称 | OpenCowork                                               |
-| 文档版本 | v2.5                                                     |
-| 更新日期 | 2026-03-29                                               |
-| 文档状态 | 重大更新（v0.4 LangChain重构规划）                       |
-| 基于竞品 | Claude Cowork + 原有AI Browser PRD                       |
-| 技术规格 | [SPEC v0.3](./SPEC_v0.3.md), [SPEC v0.4](./SPEC_v0.4.md) |
+| 项目     | 内容                                                                                  |
+| -------- | ------------------------------------------------------------------------------------- |
+| 产品名称 | OpenCowork                                                                            |
+| 文档版本 | v2.7                                                                                  |
+| 更新日期 | 2026-03-30                                                                            |
+| 文档状态 | v0.6 规划完成                                                                         |
+| 基于竞品 | Claude Cowork + 原有AI Browser PRD                                                    |
+| 技术规格 | [SPEC v0.3](./SPEC_v0.3.md), [SPEC v0.4](./SPEC_v0.4.md), [SPEC v0.5](./SPEC_v0.5.md) |
 
 ---
 
@@ -364,27 +364,27 @@ AI执行过程（用户实时观看）:
 ```typescript
 enum ActionType {
   // Browser
-  BROWSER_NAVIGATE = "browser:navigate",
-  BROWSER_CLICK = "browser:click",
-  BROWSER_INPUT = "browser:input",
-  BROWSER_EXTRACT = "browser:extract",
-  BROWSER_SCREENSHOT = "browser:screenshot",
+  BROWSER_NAVIGATE = 'browser:navigate',
+  BROWSER_CLICK = 'browser:click',
+  BROWSER_INPUT = 'browser:input',
+  BROWSER_EXTRACT = 'browser:extract',
+  BROWSER_SCREENSHOT = 'browser:screenshot',
 
   // CLI
-  CLI_EXECUTE = "cli:execute",
-  CLI_FILE_READ = "cli:file:read",
-  CLI_FILE_WRITE = "cli:file:write",
-  CLI_SCRIPT = "cli:script",
+  CLI_EXECUTE = 'cli:execute',
+  CLI_FILE_READ = 'cli:file:read',
+  CLI_FILE_WRITE = 'cli:file:write',
+  CLI_SCRIPT = 'cli:script',
 
   // Vision
-  VISION_OCR = "vision:ocr",
-  VISION_UNDERSTAND = "vision:understand",
-  VISION_CHART = "vision:chart",
+  VISION_OCR = 'vision:ocr',
+  VISION_UNDERSTAND = 'vision:understand',
+  VISION_CHART = 'vision:chart',
 
   // Control
-  WAIT = "wait",
-  ASK_USER = "ask:user",
-  DELIVER_RESULT = "deliver:result",
+  WAIT = 'wait',
+  ASK_USER = 'ask:user',
+  DELIVER_RESULT = 'deliver:result',
 }
 
 interface BaseAction {
@@ -406,32 +406,32 @@ interface BaseAction {
 ```typescript
 // 统一IPC消息格式
 interface IPCMessage {
-  type: "plan" | "execute" | "result" | "dispatch" | "schedule";
+  type: 'plan' | 'execute' | 'result' | 'dispatch' | 'schedule';
   payload: any;
   requestId: string;
   timestamp: number;
 }
 
 // 主进程 (Main Process)
-ipcMain.handle("task:dispatch", async (event, task) => {
+ipcMain.handle('task:dispatch', async (event, task) => {
   const actions = await planner.plan(task);
   return executorRouter.routeBatch(actions);
 });
 
-ipcMain.handle("task:schedule", async (event, config) => {
+ipcMain.handle('task:schedule', async (event, config) => {
   return scheduler.addTask(config);
 });
 
-ipcMain.handle("device:pair", async (event, deviceInfo) => {
+ipcMain.handle('device:pair', async (event, deviceInfo) => {
   return dispatchService.pairDevice(deviceInfo);
 });
 
 // 渲染进程 (Renderer Process)
-renderer.invoke("task:dispatch", { task: "帮我整理Downloads" });
-renderer.invoke("task:schedule", {
-  cron: "0 9 * * *",
-  task: "生成日报",
-  config: { channels: ["slack", "email"] },
+renderer.invoke('task:dispatch', { task: '帮我整理Downloads' });
+renderer.invoke('task:schedule', {
+  cron: '0 9 * * *',
+  task: '生成日报',
+  config: { channels: ['slack', 'email'] },
 });
 ```
 
@@ -489,7 +489,7 @@ class PreviewManager {
   private automationBrowser: AutomationBrowser;
 
   // 三种预览模式
-  private mode: "sidebar" | "collapsible" | "detached";
+  private mode: 'sidebar' | 'collapsible' | 'detached';
   private detachedWindow?: BrowserWindow;
 
   // 可折叠模式的展开状态
@@ -507,7 +507,7 @@ class PreviewManager {
     // 创建共享 partition 的 BrowserView
     this.previewView = new BrowserView({
       webPreferences: {
-        partition: "persist:automation", // 与自动化浏览器共享
+        partition: 'persist:automation', // 与自动化浏览器共享
       },
     });
 
@@ -515,21 +515,21 @@ class PreviewManager {
     this.mainWindow.addBrowserView(this.previewView);
 
     // 默认侧边预览模式
-    this.setMode("sidebar");
+    this.setMode('sidebar');
   }
 
   // 切换预览模式
-  setMode(mode: "sidebar" | "collapsible" | "detached") {
+  setMode(mode: 'sidebar' | 'collapsible' | 'detached') {
     this.mode = mode;
 
     switch (mode) {
-      case "sidebar":
+      case 'sidebar':
         this.enableSidebarMode();
         break;
-      case "collapsible":
+      case 'collapsible':
         this.enableCollapsibleMode();
         break;
-      case "detached":
+      case 'detached':
         this.enableDetachedMode();
         break;
     }
@@ -643,7 +643,7 @@ class AutomationBrowser {
   // 创建自动化页面
   async createPage(): Promise<Page> {
     const context = await this.browser.newContext({
-      partition: "persist:automation", // 关键：共享 partition
+      partition: 'persist:automation', // 关键：共享 partition
     });
     this.automationPage = await context.newPage();
     return this.automationPage;
@@ -651,7 +651,7 @@ class AutomationBrowser {
 
   // 获取共享 context
   getSharedPartition(): string {
-    return "persist:automation";
+    return 'persist:automation';
   }
 }
 
@@ -665,17 +665,17 @@ class PreviewManager {
     const cdpSession = await this.previewView.webContents.createCDPSession();
 
     // 启用页面相关域
-    await cdpSession.send("Page.enable");
-    await cdpSession.send("DOM.enable");
+    await cdpSession.send('Page.enable');
+    await cdpSession.send('DOM.enable');
 
     // 监听自动化页面的帧更新事件，同步到预览视图
-    automationPage.on("framenavigated", (frame) => {
+    automationPage.on('framenavigated', (frame) => {
       // 确保预览视图反映最新的frame内容
     });
 
     // 监听控制台消息，用于调试
-    cdpSession.on("Runtime.consoleAPICalled", (event) => {
-      console.log("Browser console:", event.params.args);
+    cdpSession.on('Runtime.consoleAPICalled', (event) => {
+      console.log('Browser console:', event.params.args);
     });
   }
 }
@@ -686,7 +686,7 @@ class PreviewManager {
 ```typescript
 // 预览面板顶部控制栏
 interface PreviewControlBar {
-  modeSwitcher: "sidebar" | "collapsible" | "detached";
+  modeSwitcher: 'sidebar' | 'collapsible' | 'detached';
   currentMode: PreviewMode;
   takeoverButton: boolean;
   closeButton: boolean;
@@ -843,18 +843,18 @@ interface DispatchTask {
   id: string;
   taskId: string;
   description: string;
-  priority: "low" | "normal" | "high";
+  priority: 'low' | 'normal' | 'high';
   createdAt: number;
   expiresAt?: number;
   requireAuth?: boolean;
-  preferredDevice?: "desktop" | "mobile";
+  preferredDevice?: 'desktop' | 'mobile';
 }
 
 interface DispatchResult {
   taskId: string;
-  status: "pending" | "executing" | "completed" | "failed";
+  status: 'pending' | 'executing' | 'completed' | 'failed';
   result?: {
-    type: "file" | "text" | "link";
+    type: 'file' | 'text' | 'link';
     content: any;
   };
   executedAt?: number;
@@ -882,10 +882,10 @@ socket.on('task:progress', ({ taskId, step, total }) => {
 ### 4.5 跨设备续接
 
 ```typescript
-async function resumeTaskOnDevice(taskId: string, targetDevice: "desktop") {
+async function resumeTaskOnDevice(taskId: string, targetDevice: 'desktop') {
   const taskState = await taskEngine.getTaskState(taskId);
 
-  if (taskState.status === "paused") {
+  if (taskState.status === 'paused') {
     await dispatchService.sendTask({
       taskId,
       description: taskState.originalDescription,
@@ -939,14 +939,14 @@ interface ScheduledTask {
   description: string;
 
   schedule: {
-    type: "cron" | "interval" | "one-time";
+    type: 'cron' | 'interval' | 'one-time';
     cron?: string;
     intervalMs?: number;
     startTime?: number;
   };
 
   execution: {
-    device: "any" | "desktop" | "mobile";
+    device: 'any' | 'desktop' | 'mobile';
     timeout: number;
     retryOnFail: boolean;
     maxRetries: number;
@@ -956,7 +956,7 @@ interface ScheduledTask {
     onStart: boolean;
     onComplete: boolean;
     onFail: boolean;
-    channels: ("app" | "email" | "push")[];
+    channels: ('app' | 'email' | 'push')[];
   };
 
   context?: {
@@ -993,20 +993,20 @@ interface TaskQueueConfig {
 
   retry: {
     maxAttempts: 3;
-    backoff: "exponential";
+    backoff: 'exponential';
     initialDelay: 1000;
   };
 }
 
 enum TaskStatus {
-  PENDING = "pending",
-  SCHEDULED = "scheduled",
-  EXECUTING = "executing",
-  WAITING_CONFIRM = "waiting_confirm",
-  PAUSED = "paused",
-  COMPLETED = "completed",
-  FAILED = "failed",
-  CANCELLED = "cancelled",
+  PENDING = 'pending',
+  SCHEDULED = 'scheduled',
+  EXECUTING = 'executing',
+  WAITING_CONFIRM = 'waiting_confirm',
+  PAUSED = 'paused',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  CANCELLED = 'cancelled',
 }
 ```
 
@@ -1052,8 +1052,8 @@ interface PluginManifest {
 
   permissions: {
     connectors: string[];
-    fileAccess: "none" | "read" | "write" | "all";
-    network: "none" | "limited" | "all";
+    fileAccess: 'none' | 'read' | 'write' | 'all';
+    network: 'none' | 'limited' | 'all';
     scheduledTasks: boolean;
   };
 
@@ -1076,10 +1076,10 @@ name: daily-report
 description: 生成每日的汇总报告，整合多个数据源的信息
 disable-auto-invoke: false
 allowed-actions:
-  - "cli:file:read"
-  - "cli:file:write"
-  - "connector:slack"
-  - "connector:email"
+  - 'cli:file:read'
+  - 'cli:file:write'
+  - 'connector:slack'
+  - 'connector:email'
 ---
 # Daily Report Skill
 
@@ -1116,7 +1116,7 @@ interface ConnectorDefinition {
   icon?: string;
 
   auth: {
-    type: "oauth2" | "apikey" | "basic" | "none";
+    type: 'oauth2' | 'apikey' | 'basic' | 'none';
     fields: AuthField[];
   };
 
@@ -1133,27 +1133,27 @@ interface ConnectorDefinition {
 }
 
 const slackConnector: ConnectorDefinition = {
-  id: "slack",
-  name: "Slack",
-  description: "连接Slack工作区，获取消息和发送通知",
+  id: 'slack',
+  name: 'Slack',
+  description: '连接Slack工作区，获取消息和发送通知',
 
   auth: {
-    type: "oauth2",
-    fields: ["clientId", "clientSecret", "teamId"],
+    type: 'oauth2',
+    fields: ['clientId', 'clientSecret', 'teamId'],
   },
 
   capabilities: {
-    read: ["channels", "messages", "users", "files"],
-    write: ["sendMessage", "createChannel", "uploadFile"],
-    subscribe: ["message.created", "reaction.added"],
+    read: ['channels', 'messages', 'users', 'files'],
+    write: ['sendMessage', 'createChannel', 'uploadFile'],
+    subscribe: ['message.created', 'reaction.added'],
   },
 
   endpoints: {
-    base: "https://slack.com/api",
+    base: 'https://slack.com/api',
     paths: {
-      conversations: "/conversations.list",
-      messages: "/conversations.history",
-      send: "/chat.postMessage",
+      conversations: '/conversations.list',
+      messages: '/conversations.history',
+      send: '/chat.postMessage',
     },
   },
 };
@@ -1203,10 +1203,10 @@ const slackConnector: ConnectorDefinition = {
 
 ```typescript
 enum PermissionLevel {
-  FULL_ACCESS = "full",
-  STANDARD = "standard",
-  RESTRICTED = "restricted",
-  READ_ONLY = "readonly",
+  FULL_ACCESS = 'full',
+  STANDARD = 'standard',
+  RESTRICTED = 'restricted',
+  READ_ONLY = 'readonly',
 }
 
 interface PermissionConfig {
@@ -1217,7 +1217,7 @@ interface PermissionConfig {
     blockedDomains: string[];
     screenshot: boolean;
     download: boolean;
-    clipboard: "none" | "read" | "write" | "both";
+    clipboard: 'none' | 'read' | 'write' | 'both';
   };
 
   cli: {
@@ -1251,16 +1251,16 @@ interface PermissionConfig {
 
 ```typescript
 const confirmableActions = [
-  "browser:navigate",
-  "cli:execute",
-  "cli:file:write",
-  "cli:file:delete",
-  "deliver:result",
+  'browser:navigate',
+  'cli:execute',
+  'cli:file:write',
+  'cli:file:delete',
+  'deliver:result',
 ];
 
 interface ConfirmationRequest {
   action: BaseAction;
-  risk: "low" | "medium" | "high";
+  risk: 'low' | 'medium' | 'high';
   reason: string;
   alternatives?: string[];
   preview?: {
@@ -1285,8 +1285,8 @@ interface ConfirmationRequest {
 
 ```typescript
 enum PreviewMode {
-  VIEWING = "viewing", // 观看模式：AI操作浏览器，用户观看
-  TAKEOVER = "takeover", // 接管模式：用户操作浏览器，AI暂停
+  VIEWING = 'viewing', // 观看模式：AI操作浏览器，用户观看
+  TAKEOVER = 'takeover', // 接管模式：用户操作浏览器，AI暂停
 }
 
 // 模式切换流程
@@ -1323,9 +1323,9 @@ interface TakeoverResult {
 }
 
 enum TakeoverOption {
-  CONTINUE_AI = "continue_ai", // 交还AI控制
-  RESTART = "restart", // 重新开始
-  MANUAL_COMPLETE = "manual_complete", // 人工完成
+  CONTINUE_AI = 'continue_ai', // 交还AI控制
+  RESTART = 'restart', // 重新开始
+  MANUAL_COMPLETE = 'manual_complete', // 人工完成
 }
 ```
 
@@ -1354,7 +1354,7 @@ interface AuditLog {
   timestamp: number;
 
   actor: {
-    type: "ai" | "user" | "system";
+    type: 'ai' | 'user' | 'system';
     userId?: string;
     sessionId: string;
   };
@@ -1366,7 +1366,7 @@ interface AuditLog {
   };
 
   result: {
-    status: "success" | "failed" | "blocked" | "confirmed";
+    status: 'success' | 'failed' | 'blocked' | 'confirmed';
     output?: any;
     error?: string;
     reason?: string;
@@ -1669,21 +1669,21 @@ interface AuditLog {
 
 ```typescript
 enum PreviewMode {
-  VIEWING = "viewing", // 观看模式：AI操作，用户观看
-  TAKEOVER = "takeover", // 接管模式：用户操作，AI暂停
+  VIEWING = 'viewing', // 观看模式：AI操作，用户观看
+  TAKEOVER = 'takeover', // 接管模式：用户操作，AI暂停
 }
 
 // 模式切换
 function switchToViewingMode() {
   // 用户交还控制，AI继续执行
   taskEngine.resume();
-  previewMode = "viewing";
+  previewMode = 'viewing';
 }
 
 function switchToTakeoverMode() {
   // 用户接管，AI暂停
   taskEngine.pause();
-  previewMode = "takeover";
+  previewMode = 'takeover';
 
   // 用户可以手动操作浏览器
   // 操作完成后可选择：
@@ -1875,8 +1875,15 @@ function switchToTakeoverMode() {
 
 | 功能             | 周期       | 交付标准           |
 | ---------------- | ---------- | ------------------ |
-| **定时任务系统** | Week 25-28 | Cron调度、任务队列 |
-| **调度优化**     | Week 27-30 | 优先级调度、并发   |
+| **定时任务核心** | Week 25-26 | Cron调度、持久化   |
+| **任务队列**     | Week 27-28 | 重试机制、并发控制 |
+| **UI 集成**      | Week 29-30 | 任务面板、Cron配置 |
+
+**技术选型**:
+
+- 任务调度: node-cron (无 Redis 依赖)
+- 持久化: 复用 TaskHistory SQLite
+- 时区: 系统本地时区
 
 **里程碑**: 定时任务版本
 
@@ -1996,6 +2003,139 @@ function switchToTakeoverMode() {
 | 持久化 | SQLite Checkpointer | `MemorySaver` Checkpointer | ✅ 已确认 |
 
 **评估结论**：内存存储配置简单，SQLite 可在后续按需引入。
+
+---
+
+## 13. v0.6 定时任务系统详细规划
+
+> 更新日期: 2026-03-30
+
+### 13.1 技术方案
+
+| 项目     | 原 PRD 规划         | 调整后                  | 理由                         |
+| -------- | ------------------- | ----------------------- | ---------------------------- |
+| 任务队列 | BullMQ (需要 Redis) | node-cron + 内存队列    | 桌面应用无需分布式，简化依赖 |
+| 持久化   | 新建                | 复用 TaskHistory SQLite | 避免重复建设                 |
+| 时区     | 未明确              | 系统本地时区            | 简化设计，单用户场景足够     |
+
+### 13.2 核心模块结构
+
+```
+src/scheduler/
+├── scheduler.ts           # 调度器主类
+├── cronParser.ts         # Cron 表达式解析
+├── taskQueue.ts          # 任务队列 (内存)
+├── taskStore.ts          # 定时任务持久化 (复用 SQLite)
+└── types.ts              # 类型定义
+```
+
+### 13.3 定时任务数据模型
+
+```typescript
+interface ScheduledTask {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+
+  // 调度配置
+  schedule: {
+    type: 'cron' | 'interval' | 'one-time';
+    cron?: string; // Cron 表达式 (本地时区)
+    intervalMs?: number; // 间隔 (毫秒)
+    startTime?: number; // 一次性任务开始时间
+  };
+
+  // 执行配置
+  execution: {
+    taskDescription: string; // 实际执行的任务描述
+    timeout: number; // 超时 (ms)
+    maxRetries: number; // 最大重试次数
+    retryDelayMs: number; // 重试间隔
+  };
+
+  // 状态
+  lastRun?: number;
+  nextRun?: number;
+  lastStatus?: 'success' | 'failed' | 'cancelled';
+  runCount: number;
+
+  createdAt: number;
+  updatedAt: number;
+}
+```
+
+### 13.4 Cron 表达式配置 UI
+
+```
+执行时间配置:
+┌─────────────────────────────────────────────────────────────┐
+│ ○ 每天 [09:00▼]                                          │
+│ ○ 每周 [周五▼] [18:00▼]                                 │
+│ ○ 自定义 [0 9 * * *▼] ← 支持直接输入 Cron 表达式      │
+│                                                             │
+│ 常用表达式:                                                │
+│   • 每天 9:00      → 0 9 * * *                          │
+│   • 每周一 9:00   → 0 9 * * 1                           │
+│   • 每月 1 日 9:00 → 0 9 1 * *                           │
+│   • 每小时        → 0 * * * *                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 13.5 定时任务列表 UI
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  定时任务                                      [+ 新建]  │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  🔄 执行中                                                   │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ 📊 生成日报    下次: 今天 09:00  [暂停] [停止]        ││
+│  └─────────────────────────────────────────────────────────┘│
+│                                                              │
+│  ⏰ 待执行                                                   │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ 📁 文件整理    下次: 今天 23:00  [启用]               ││
+│  └─────────────────────────────────────────────────────────┘│
+│                                                              │
+│  ✅ 最近执行 (5次)                                          │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ 📧 邮件摘要    昨天 09:00  ✓ 成功     [查看] [重试]  ││
+│  └─────────────────────────────────────────────────────────┘│
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 13.6 实施计划
+
+| 周次    | 里程碑   | 任务                             | 交付物                        |
+| ------- | -------- | -------------------------------- | ----------------------------- |
+| Week 25 | 核心调度 | CronParser, TaskStore, Scheduler | 定时触发、持久化              |
+| Week 26 |          | 定时触发机制                     | 任务可到期自动执行            |
+| Week 27 | 队列系统 | TaskQueue, 重试机制              | 失败重试、exponential backoff |
+| Week 28 |          | 并发控制                         | 限制同时执行任务数            |
+| Week 29 | UI 集成  | 定时任务面板                     | 创建/编辑/删除/启用/禁用      |
+| Week 30 | 完成     | Cron 配置 UI, TaskHistory 集成   | 完整定时任务功能              |
+
+### 13.7 与现有系统集成
+
+| 系统         | 集成点       | 方式                              |
+| ------------ | ------------ | --------------------------------- |
+| TaskHistory  | 执行记录写入 | 定时任务执行结果自动记录          |
+| Skill System | 任务描述执行 | 定时任务通过 Skill 执行复杂任务   |
+| LLM          | 任务规划     | 复用现有 TaskPlanner 进行任务分解 |
+| UI           | 任务面板     | 新增定时任务 Tab 页               |
+
+### 13.8 依赖
+
+```json
+{
+  "dependencies": {
+    "node-cron": "^3.0.0"
+  }
+}
+```
 
 ---
 
