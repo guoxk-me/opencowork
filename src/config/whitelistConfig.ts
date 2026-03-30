@@ -84,11 +84,10 @@ export const DEFAULT_WHITELIST_CONFIG: WhitelistConfig = {
         command: 'curl',
         allowed: true,
         args: ['-X GET', '-H', '-d', '--max-time'],
-        riskLevel: 'medium',
+        riskLevel: 'high',
       },
       { command: 'ls', allowed: true, args: ['-la', '-l', '-a'], riskLevel: 'low' },
       { command: 'pwd', allowed: true, args: [], riskLevel: 'low' },
-      { command: 'echo', allowed: true, args: ['*'], riskLevel: 'low' },
     ],
   },
   paths: {
@@ -155,6 +154,24 @@ export function validateWhitelistConfig(config: WhitelistConfig): WhitelistValid
         warnings.push(`Path "${entry.path}" has no permissions`);
       }
     });
+  }
+
+  if (config.network.enabled) {
+    config.network.hosts.forEach((host) => {
+      if (!host.host || host.host.trim() === '') {
+        errors.push('Network host cannot be empty');
+      }
+      const hostnamePattern = /^[a-zA-Z0-9]([a-zA-Z0-9\-*.]{0,61}[a-zA-Z0-9])?$/;
+      const cleanHost = host.host.replace(/^\*\./, '');
+      if (!hostnamePattern.test(cleanHost)) {
+        errors.push(`Invalid network host: "${host.host}"`);
+      }
+    });
+
+    const uniqueHosts = new Set(config.network.hosts.map((h) => h.host));
+    if (uniqueHosts.size !== config.network.hosts.length) {
+      warnings.push('Duplicate network hosts detected');
+    }
   }
 
   if (config.agents.enabled) {

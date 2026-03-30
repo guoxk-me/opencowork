@@ -2,13 +2,105 @@
 
 | 版本   | 日期       | 状态   |
 | ------ | ---------- | ------ |
-| v0.4.0 | 2026-03-29 | 规划中 |
+| v0.5.0 | 2026-03-30 | 已发布 |
+| v0.4.0 | 2026-03-30 | 已发布 |
 | v0.3.0 | 2026-03-29 | 已发布 |
 | v0.2.3 | 2026-03-29 | 已发布 |
 
 ---
 
-## v0.4.0 (规划中) - LangChain/LangGraph 重构
+## v0.5.0 (2026-03-30) - TaskHistory + Skill System + WhitelistConfigUI
+
+### 版本目标
+
+新增三大核心功能模块：TaskHistory、Skill System、WhitelistConfigUI
+
+### 新增功能
+
+#### TaskHistory - 任务历史系统
+
+1. **SQLite 持久化存储**
+   - 任务历史存储在 `history.db` 数据库
+   - 支持断电重启后数据不丢失
+   - 自动同步内存到 SQLite
+
+2. **完整状态追踪**
+   - pending → running → completed/failed/cancelled
+   - 每个任务记录开始时间、结束时间、耗时
+   - 执行步骤详情记录
+
+3. **统计指标**
+   - 总任务数、成功率、平均耗时
+   - 按状态分类统计
+
+#### Skill System - 技能系统
+
+1. **SKILL.md 规范支持**
+   - 完全兼容 Claude 官方技能定义格式
+   - YAML frontmatter 解析 (使用 js-yaml)
+   - 触发器配置 (keyword/pattern/intent)
+
+2. **技能市场**
+   - 安装、卸载、查看已安装技能
+   - 技能目录管理 (`~/.opencowork/skills/`)
+
+3. **安全执行**
+   - 命令白名单限制
+   - 路径验证防止目录遍历
+   - Shell 注入保护
+
+#### WhitelistConfigUI - 白名单配置
+
+1. **可视化配置界面**
+   - Tab 切换 (CLI/路径/网络/Agent)
+   - 风险等级标注
+   - 保存/重置功能
+
+2. **配置类型**
+   - CLI 命令白名单
+   - 路径访问权限
+   - 网络访问控制
+   - Agent 工具限制
+
+### 安全修复
+
+| CVE ID | 严重程度 | 问题                    | 修复           |
+| ------ | -------- | ----------------------- | -------------- |
+| -      | 严重     | Skill 路径遍历漏洞      | 添加路径验证   |
+| -      | 严重     | 危险命令 (cat) 在白名单 | 从允许列表移除 |
+| -      | 高       | Shell 注入风险          | 默认关闭       |
+| -      | 高       | SQLite 写入数据丢失     | 重试机制       |
+
+### 代码质量
+
+| 优先级    | 修复数量 | 示例               |
+| --------- | -------- | ------------------ |
+| P0 (严重) | 4        | 路径遍历、危险命令 |
+| P1 (高)   | 7        | 竞态条件、统计不准 |
+| P2 (中)   | 11       | 空 catch、格式验证 |
+
+### 新增文件
+
+| 文件                                               | 用途                        |
+| -------------------------------------------------- | --------------------------- |
+| `src/history/*.ts`                                 | TaskHistory 模块 (6个文件)  |
+| `src/skills/*.ts`                                  | Skill System 模块 (4个文件) |
+| `src/config/whitelistConfig*.ts`                   | 白名单配置模块              |
+| `src/renderer/components/HistoryPanel.tsx`         | 历史面板组件                |
+| `src/renderer/components/SkillPanel.tsx`           | 技能面板组件                |
+| `src/renderer/components/WhitelistConfigPanel.tsx` | 白名单配置组件              |
+| `src/renderer/stores/historyStore.ts`              | 前端状态管理                |
+
+### 依赖更新
+
+| 依赖           | 版本    | 说明        |
+| -------------- | ------- | ----------- |
+| better-sqlite3 | ^11.0.0 | SQLite 支持 |
+| js-yaml        | ^4.1.0  | YAML 解析   |
+
+---
+
+## v0.4.0 (2026-03-30) - LangChain/LangGraph 重构
 
 ### 版本目标
 

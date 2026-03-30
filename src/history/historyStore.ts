@@ -7,6 +7,9 @@ export class HistoryStore {
   private sqliteStore: SQLiteStore;
   private syncToSqliteTimer: NodeJS.Timeout | null = null;
   private pendingSqliteWrites: TaskHistoryRecord[] = [];
+  private flushInProgress = false;
+  private maxRetries = 3;
+  private retryCounts: Map<string, number> = new Map();
 
   constructor(sqlitePath: string = './history.db') {
     this.memoryStore = new MemoryStore(['current']);
@@ -22,6 +25,7 @@ export class HistoryStore {
     this.pendingSqliteWrites.push(record);
     if (this.syncToSqliteTimer) {
       clearTimeout(this.syncToSqliteTimer);
+      this.syncToSqliteTimer = null;
     }
     this.syncToSqliteTimer = setTimeout(() => {
       this.flushToSqlite();
@@ -29,15 +33,37 @@ export class HistoryStore {
   }
 
   private async flushToSqlite(): Promise<void> {
-    const records = [...this.pendingSqliteWrites];
-    this.pendingSqliteWrites = [];
-    for (const record of records) {
-      try {
-        await this.sqliteStore.put(['history'], `task_${record.id}`, record);
-      } catch (error) {
-        console.error('[HistoryStore] Failed to sync to SQLite:', error);
-        this.pendingSqliteWrites.push(record);
+    if (this.flushInProgress) {
+      return;
+    }
+    this.flushInProgress = true;
+
+    try {
+      const records = [...this.pendingSqliteWrites];
+      const failedRecords: TaskHistoryRecord[] = [];
+
+      for (const record of records) {
+        const retryCount = this.retryCounts.get(record.id) || 0;
+        try {
+          await this.sqliteStore.put(['history'], `task_${record.id}`, record);
+          this.retryCounts.delete(record.id);
+        } catch (error) {
+          console.error('[HistoryStore] Failed to sync to SQLite:', error);
+          if (retryCount < this.maxRetries) {
+            this.retryCounts.set(record.id, retryCount + 1);
+            failedRecords.push(record);
+          } else {
+            console.error(
+              `[HistoryStore] Max retries exceeded for task ${record.id}, dropping record`
+            );
+            this.retryCounts.delete(record.id);
+          }
+        }
       }
+
+      this.pendingSqliteWrites = failedRecords;
+    } finally {
+      this.flushInProgress = false;
     }
   }
 
@@ -89,14 +115,21 @@ export class HistoryStore {
   async close(): Promise<void> {
     if (this.syncToSqliteTimer) {
       clearTimeout(this.syncToSqliteTimer);
-      await this.flushToSqlite();
+      this.syncToSqliteTimer = null;
     }
+    await this.flushToSqlite();
     await this.sqliteStore.close();
   }
 
   async clear(): Promise<void> {
+    this.pendingSqliteWrites = [];
+    this.retryCounts.clear();
     await this.memoryStore.clear();
     await this.sqliteStore.clear();
+  }
+
+  async getTotalCount(): Promise<number> {
+    return await this.sqliteStore.size();
   }
 }
 

@@ -19,17 +19,17 @@ export interface TaskHistoryRecord {
   id: string;
   taskId: string;
   task: string;
-  status: 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   startTime: number;
   endTime: number;
   duration: number;
   steps: TaskStep[];
   result?: TaskResult;
-  agentMemory?: Record<string, any>;
+  agentMemory?: Record<string, unknown>;
   metadata?: {
     model?: string;
     threadId?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 

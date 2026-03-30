@@ -11,6 +11,9 @@ import {
 export class SkillLoader {
   private skillsDirs: string[];
   private manifestCache: Map<string, SkillManifest> = new Map();
+  private skillsCache: InstalledSkill[] | null = null;
+  private skillsCacheTime: number = 0;
+  private readonly CACHE_TTL_MS = 5000;
 
   constructor(skillsDirs?: string[]) {
     this.skillsDirs = skillsDirs || this.getDefaultSkillDirs();
@@ -25,10 +28,26 @@ export class SkillLoader {
   }
 
   async loadSkill(skillPath: string): Promise<InstalledSkill> {
+    const resolvedPath = path.resolve(skillPath);
+    const isPathAllowed = this.skillsDirs.some((dir) => {
+      const resolvedDir = path.resolve(dir);
+      return resolvedPath.startsWith(resolvedDir + path.sep) || resolvedPath === resolvedDir;
+    });
+
+    if (!isPathAllowed) {
+      throw new Error(
+        `Skill path "${skillPath}" is not within allowed skills directories: ${this.skillsDirs.join(', ')}`
+      );
+    }
+
     const manifestPath = path.join(skillPath, 'SKILL.md');
     const stats = await fs.promises.stat(manifestPath).catch(() => null);
     if (!stats || !stats.isFile()) {
       throw new Error(`SKILL.md not found at ${manifestPath}`);
+    }
+
+    if (stats.size > 1024 * 1024) {
+      throw new Error(`SKILL.md at ${manifestPath} exceeds maximum size of 1MB`);
     }
 
     const content = await fs.promises.readFile(manifestPath, 'utf-8');
@@ -64,7 +83,9 @@ export class SkillLoader {
       const pkg = JSON.parse(packageJson);
       skill.version = pkg.version;
       skill.author = pkg.author;
-    } catch {}
+    } catch (e) {
+      console.debug(`[SkillLoader] No package.json for skill ${name}`);
+    }
 
     return skill;
   }
@@ -99,6 +120,11 @@ export class SkillLoader {
   }
 
   async loadAllSkills(): Promise<InstalledSkill[]> {
+    const now = Date.now();
+    if (this.skillsCache && now - this.skillsCacheTime < this.CACHE_TTL_MS) {
+      return this.skillsCache;
+    }
+
     const skills: InstalledSkill[] = [];
     const seen = new Set<string>();
 
@@ -118,9 +144,13 @@ export class SkillLoader {
             }
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn(`[SkillLoader] Failed to read skills directory ${dir}:`, e);
+      }
     }
 
+    this.skillsCache = skills;
+    this.skillsCacheTime = now;
     return skills;
   }
 
@@ -135,15 +165,21 @@ export class SkillLoader {
         return bPriority - aPriority;
       });
 
-    if (matched.length > 0) {
-      const topMatch = matched[0];
-      if (topMatch.manifest.triggers?.[0]?.exclusive) {
-        return topMatch;
-      }
-      return matched[0];
+    if (matched.length === 0) {
+      return null;
     }
 
-    return null;
+    const topMatch = matched[0];
+    if (topMatch.manifest.triggers?.[0]?.exclusive) {
+      return topMatch;
+    }
+
+    const hasExclusiveMatch = matched.some((s) => s.manifest.triggers?.[0]?.exclusive);
+    if (hasExclusiveMatch) {
+      return null;
+    }
+
+    return matched[0];
   }
 
   private matchesTrigger(skill: InstalledSkill, input: string): boolean {
@@ -175,6 +211,10 @@ export class SkillLoader {
   }
 
   async getSkill(name: string): Promise<InstalledSkill | null> {
+    if (this.skillsCache) {
+      return this.skillsCache.find((s) => s.manifest.name === name) || null;
+    }
+
     if (this.manifestCache.has(name)) {
       const manifest = this.manifestCache.get(name)!;
       return {
@@ -199,6 +239,8 @@ export class SkillLoader {
 
   clearCache(): void {
     this.manifestCache.clear();
+    this.skillsCache = null;
+    this.skillsCacheTime = 0;
   }
 }
 

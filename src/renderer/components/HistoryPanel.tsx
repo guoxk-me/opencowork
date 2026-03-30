@@ -10,6 +10,7 @@ export function HistoryPanel() {
     isLoading,
     tasks,
     selectedTask,
+    selectedTaskId,
     filter,
     total,
     setIsOpen,
@@ -28,6 +29,8 @@ export function HistoryPanel() {
     if (isOpen) {
       loadTasks();
     }
+    // loadTasks is stable from Zustand store
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   useEffect(() => {
@@ -38,6 +41,8 @@ export function HistoryPanel() {
       delete newFilter.status;
     }
     setFilter(newFilter);
+    // setFilter and filter are stable from Zustand store
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const handleSearch = () => {
@@ -162,7 +167,7 @@ export function HistoryPanel() {
                     key={task.id}
                     onClick={() => setSelectedTaskId(task.id)}
                     className={`p-3 rounded cursor-pointer transition-colors ${
-                      useHistoryStore.getState().selectedTaskId === task.id
+                      selectedTaskId === task.id
                         ? 'bg-primary/20 border border-primary/30'
                         : 'hover:bg-border/50 border border-transparent'
                     }`}

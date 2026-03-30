@@ -1,8 +1,8 @@
-# OpenCowork v0.4 使用说明
+# OpenCowork v0.5 使用说明
 
 | 项目     | 内容       |
 | -------- | ---------- |
-| 版本     | v0.4       |
+| 版本     | v0.5       |
 | 更新日期 | 2026-03-30 |
 | 状态     | 正式版     |
 
@@ -11,10 +11,10 @@
 ## 目录
 
 1. [项目简介](#1-项目简介)
-2. [快速开始](#2-快速开始)
-3. [配置说明](#3-配置说明)
-4. [功能使用](#4-功能使用)
-5. [快捷键](#5-快捷键)
+2. [TaskHistory 任务历史](#2-taskhistory-任务历史)
+3. [Skill System 技能系统](#3-skill-system-技能系统)
+4. [WhitelistConfigUI 白名单配置](#4-whitelistconfigui-白名单配置)
+5. [快速开始](#5-快速开始)
 6. [目录结构](#6-目录结构)
 7. [常见问题](#7-常见问题)
 
@@ -22,51 +22,145 @@
 
 ## 1. 项目简介
 
-OpenCowork 是一款 **AI Native Desktop Agent**，让AI像人类一样使用电脑完成复杂任务。
+OpenCowork v0.5 是一款 **AI Native Desktop Agent**，让AI像人类一样使用电脑完成复杂任务。
+
+### v0.5 新增功能
+
+| 功能                  | 说明                                           |
+| --------------------- | ---------------------------------------------- |
+| **TaskHistory**       | 完整的任务执行历史记录，支持 SQLite 持久化存储 |
+| **Skill System**      | Claude 兼容的 SKILL.md 技能系统                |
+| **WhitelistConfigUI** | 可视化白名单配置界面                           |
 
 ### 核心能力
 
-| 能力                        | 说明                                       |
-| --------------------------- | ------------------------------------------ |
-| 浏览器自动化                | AI自主操作浏览器完成网页任务               |
-| 任务规划                    | 将复杂任务分解为可执行步骤                 |
-| **侧边栏实时预览**          | 实时观看AI操作浏览器（24fps）              |
-| 人工接管                    | 随时接管AI的控制权                         |
-| **用户交互**                | AI可暂停等待用户确认                       |
-| **LLM驱动重试**             | 失败时LLM决策重试策略（最多3次）           |
-| **会话持久化**              | 会话历史自动保存，跨任务保留上下文         |
-| **元素滚动到视口**          | 自动滚动到元素位置再操作                   |
-| **PressEnter支持**          | 输入后自动按Enter提交                      |
-| CLI执行                     | 执行白名单内的系统命令                     |
-| **UIGraph语义层**           | DOM转换为语义化元素图谱，提升LLM理解准确率 |
-| **Verifier验证层**          | 每步执行后验证页面状态变化                 |
-| **RecoveryEngine恢复引擎**  | LLM决策恢复策略，失败后自动恢复            |
-| **ShortTermMemory短期记忆** | 记录成功/失败轨迹，避免重复错误            |
-| **任务上下文理解**          | 第二个任务可基于前一个任务的结果进行分析   |
-
-### 技术栈
-
-| 层级         | 技术                         |
-| ------------ | ---------------------------- |
-| 桌面框架     | Electron 28                  |
-| UI框架       | React 18 + TailwindCSS       |
-| 语言         | TypeScript                   |
-| 浏览器自动化 | Playwright                   |
-| LLM框架      | LangChain/LangGraph          |
-| LLM          | OpenAI Responses API (Azure) |
+| 能力         | 说明                          |
+| ------------ | ----------------------------- |
+| 浏览器自动化 | AI自主操作浏览器完成网页任务  |
+| 任务规划     | 将复杂任务分解为可执行步骤    |
+| 实时预览     | 侧边栏实时观看AI操作（24fps） |
+| 人工接管     | 随时接管AI的控制权            |
+| 任务历史     | 完整记录所有任务执行历史      |
+| 技能系统     | 安装和管理自定义技能          |
 
 ---
 
-## 2. 快速开始
+## 2. TaskHistory 任务历史
 
-### 2.1 安装依赖
+### 功能特点
+
+- **SQLite 持久化**：任务历史存储在本地数据库，重启后保留
+- **状态追踪**：支持 pending/running/completed/failed/cancelled 五种状态
+- **步骤详情**：记录每个任务的执行步骤和耗时
+- **实时统计**：显示任务成功/失败/取消统计
+
+### 使用方法
+
+1. 点击控制栏中的 **历史** 按钮打开任务历史面板
+2. 查看所有任务的执行记录
+3. 点击任务查看详细信息（步骤、耗时、结果）
+4. 支持搜索和按状态筛选
+
+### 数据存储
+
+- 数据库路径：`./history.db`
+- 内存缓存：最近任务缓存在内存中提高查询速度
+- 自动同步：任务完成后自动同步到 SQLite
+
+---
+
+## 3. Skill System 技能系统
+
+### 什么是 Skill？
+
+Skill 是一种可扩展的功能模块，通过 `SKILL.md` 文件定义，符合 Claude 官方规范。
+
+### 使用 Skill
+
+1. 打开 **Skill 管理** 面板（控制栏按钮）
+2. 点击 **安装 Skill** 输入技能目录路径
+3. 已安装的技能会自动显示在列表中
+4. 在任务输入框中触发技能（通过关键词匹配）
+
+### SKILL.md 示例
+
+```yaml
+---
+name: git-helper
+description: Git 操作助手
+triggers:
+  - type: keyword
+    value: [git, github]
+    priority: 80
+    exclusive: false
+shell: bash
+---
+
+# Git Helper Skill
+
+使用 git 命令帮助完成版本控制任务。
+
+## 可用命令
+
+$ARGUMENTS
+```
+
+### 目录结构
+
+```
+~/.opencowork/skills/
+├── git-helper/
+│   ├── SKILL.md
+│   └── package.json
+└── code-review/
+    ├── SKILL.md
+    └── package.json
+```
+
+### 安全机制
+
+- **路径验证**：Skill 只能在指定目录下加载
+- **命令白名单**：仅允许预定义的命令执行
+- **Shell 注入保护**：默认关闭 shell 注入
+
+---
+
+## 4. WhitelistConfigUI 白名单配置
+
+### 功能特点
+
+- **可视化配置**：图形界面管理 CLI/路径/网络/Agent 白名单
+- **风险等级**：每条规则标注风险等级（低/中/高/极高）
+- **实时生效**：保存后立即生效
+
+### 配置项
+
+| 类型       | 说明                               |
+| ---------- | ---------------------------------- |
+| CLI 命令   | 允许执行的系统命令及参数           |
+| 路径访问   | 允许访问的目录及权限（读/写/执行） |
+| 网络访问   | 允许访问的主机和阻止的端口         |
+| Agent 工具 | 允许使用的工具和最大调用次数       |
+
+### 使用方法
+
+1. 打开 **设置** 或 **白名单配置** 面板
+2. 切换标签页查看不同类型的配置
+3. 修改后点击 **保存** 按钮
+4. 点击 **重置** 恢复默认配置
+
+---
+
+## 5. 快速开始
+
+### 5.1 安装依赖
 
 ```bash
 cd opencowork
 npm install
 ```
 
-### 2.2 配置LLM
+### 5.2 配置 LLM
 
 编辑 `config/llm.json`，填入你的 Azure OpenAI 配置：
 
@@ -75,205 +169,25 @@ npm install
   "provider": "openai",
   "model": "gpt-4-turbo",
   "apiKey": "你的API Key",
-  "baseUrl": "https://your-resource.openai.azure.com/openai/v1",
-  "timeout": 60000,
-  "maxRetries": 3,
-  "temperature": 0.7
+  "baseUrl": "https://your-resource.openai.azure.com/openai/v1"
 }
 ```
 
-### 2.3 启动应用
+### 5.3 启动应用
 
 ```bash
 npm run electron:dev
 ```
 
----
-
-## 3. 配置说明
-
-### 3.1 LLM配置 (config/llm.json)
-
-| 参数        | 说明                        | 必填          |
-| ----------- | --------------------------- | ------------- |
-| provider    | LLM供应商，目前支持`openai` | 是            |
-| model       | 模型名称，如`gpt-4-turbo`   | 是            |
-| apiKey      | OpenAI API Key              | 是            |
-| baseUrl     | API地址（Azure格式）        | 是            |
-| timeout     | 请求超时(ms)                | 否，默认60000 |
-| maxRetries  | 最大重试次数                | 否，默认3     |
-| temperature | 生成温度，越低越确定性      | 否，默认0.7   |
-
-### 3.2 CLI白名单 (src/config/whitelist.ts)
-
-```typescript
-const CLI_WHITELIST = {
-  commands: {
-    git: { allowed: ["status", "pull", "push", "clone"] },
-    npm: { allowed: ["install", "run", "test"] },
-    // ...
-  },
-  paths: {
-    "~/Documents": "read-write",
-    "~/Downloads": "read-write",
-  },
-};
-```
-
----
-
-## 4. 功能使用
-
-### 4.1 创建任务
+### 5.4 创建任务
 
 在输入框中描述你想完成的任务：
 
 ```
-输入: "打开百度并搜索高海宁"
-输入: "在小红书搜索护肤教程"
-输入: "在当前页面的评论区输入 cowork 并回车提交"
+打开百度并搜索高海宁
+在小红书搜索护肤教程
+使用 git-helper 提交代码
 ```
-
-### 4.2 观看任务执行
-
-**侧边栏实时预览**：
-
-- 应用启动后默认显示侧边栏预览（右侧40%区域）
-- 实时显示浏览器操作，帧率约 24fps
-- 预览区显示当前操作步骤
-
-### 4.3 预览模式切换
-
-在控制栏右侧有两个图标按钮：
-
-| 按钮          | 功能                            |
-| ------------- | ------------------------------- |
-| 👁 (眼睛图标) | 侧边栏模式 - 右侧实时预览       |
-| 📱 (窗口图标) | 独立窗口模式 - 弹出独立预览窗口 |
-
-### 4.4 人工接管
-
-**触发接管的方式**:
-
-| 方式     | 操作           |
-| -------- | -------------- |
-| ESC键    | 按下ESC键      |
-| 接管按钮 | 点击"接管"按钮 |
-
-**接管后可选择**:
-
-| 选项       | 说明                 |
-| ---------- | -------------------- |
-| 交还AI控制 | AI从中断处继续执行   |
-| 重新开始   | 清空上下文，重新规划 |
-| 人工完成   | 任务结束             |
-| 取消任务   | 取消整个任务         |
-
-### 4.5 ask:user 用户交互
-
-AI 在执行复杂任务时，可能需要用户确认。会出现：
-
-- 弹窗显示问题
-- 选项按钮供选择（或自由输入）
-- 5分钟超时限制
-
-选择后任务继续执行。
-
-### 4.6 控制栏按钮
-
-| 按钮 | 功能                   |
-| ---- | ---------------------- |
-| 接管 | 接管AI的控制权         |
-| 暂停 | 暂停当前任务           |
-| 停止 | 停止当前任务           |
-| 👁   | 切换到侧边栏预览模式   |
-| 📱   | 切换到独立窗口预览模式 |
-| 计划 | 显示/隐藏执行计划      |
-
-### 4.7 会话历史
-
-**会话面板**（左侧）：
-
-- 自动保存任务对话到当前会话
-- 支持创建新会话
-- 切换不同会话查看历史
-- 重命名/删除会话
-
-**会话持久化**：
-
-- 会话数据存储在 `~/.opencowork/sessions/`
-- 任务完成后自动保存对话
-- 切换会话时加载对应的历史记录
-
-### 4.8 LLM 驱动的重试机制
-
-当节点执行失败时：
-
-1. **自动调用 LLM 分析** - LLM 分析失败原因
-2. **LLM 决策策略** - 决定下一步行动：
-   - `retry_same` - 重试相同操作
-   - `regenerate_selector` - 重新生成选择器
-   - `simplify_action` - 简化操作（如添加强制输入）
-   - `skip_step` - 跳过该步骤
-   - `ask_user` - 询问用户是否继续
-   - `give_up` - 放弃
-3. **最多重试 3 次** - 超过后任务失败
-4. **状态显示** - 界面显示重试进度
-
-### 4.8 登录弹窗检测
-
-**触发方式**：
-
-- 点击控制栏中的"检测登录"按钮
-
-**说明**：
-
-- 当任务执行遇到登录弹窗时，AI可能无法自动处理
-- 用户可以手动点击"检测登录"按钮让AI检测当前是否在登录状态
-- 检测到登录弹窗时，会提示用户处理
-
-### 4.9 任务上下文理解
-
-**功能说明**：
-
-- 第二个任务可以基于前一个任务的结果进行分析
-- 无需重复搜索，AI会自动使用上一个任务的提取结果
-
-**使用示例**：
-
-```
-用户: "打开百度搜索虚沅数"
-AI: 执行搜索并提取结果
-
-用户: "根据你搜到的内容分析这家公司"
-AI: 直接使用前一个任务的搜索结果进行分析，无需重新搜索
-```
-
-### 4.10 搜索结果格式化显示
-
-**功能说明**：
-
-- 提取的搜索结果会自动清洗 HTML 标签
-- 格式化显示为易读的列表形式
-
-**显示效果**：
-
-```
-1. 虚沅数(上海)网络信息科技有限公司
-   微软实验室助力虚沅数，打造搭载 ChatGPT 能力的 3D AI 数字人...
-
-2. 虚沅数(上海)网络信息科技有限公司怎么样 - 爱企查
-   2026年2月17日虚沅数(上海)网络信息科技有限公司法定代表人为高海宁...
-```
-
----
-
-## 5. 快捷键
-
-| 快捷键     | 功能 | 说明             |
-| ---------- | ---- | ---------------- |
-| ESC        | 接管 | 立即接管AI控制权 |
-| Ctrl+Enter | 发送 | 发送当前输入     |
 
 ---
 
@@ -282,238 +196,79 @@ AI: 直接使用前一个任务的搜索结果进行分析，无需重新搜索
 ```
 opencowork/
 ├── src/
-│   ├── main/               # Electron主进程
-│   │   ├── index.ts       # 入口文件
-│   │   ├── window.ts      # 窗口管理
-│   │   ├── ipc.ts        # IPC通信
-│   │   ├── ipcHandlers.ts # IPC处理器
-│   │   ├── shortcuts.ts  # 快捷键
-│   │   └── SessionManager.ts  # 会话管理
+│   ├── history/              # TaskHistory 模块 (v0.5 新增)
+│   │   ├── taskHistory.ts     # 类型定义
+│   │   ├── memoryStore.ts    # 内存存储
+│   │   ├── sqliteStore.ts    # SQLite 持久化
+│   │   ├── historyStore.ts    # 存储管理
+│   │   ├── historyService.ts  # 业务逻辑
+│   │   └── historyApi.ts      # API 定义
 │   │
-│   ├── renderer/          # React渲染进程
-│   │   ├── App.tsx       # 主应用
-│   │   ├── components/   # UI组件
-│   │   │   ├── ChatUI.tsx
-│   │   │   ├── ChatInput.tsx
-│   │   │   ├── ChatMessage.tsx
-│   │   │   ├── ControlBar.tsx      # 含模式切换按钮
-│   │   │   ├── TaskStatus.tsx
-│   │   │   ├── TakeoverModal.tsx
-│   │   │   ├── PlanViewer.tsx
-│   │   │   ├── AskUserDialog.tsx    # 用户确认对话框
-│   │   │   └── SessionPanel.tsx      # 会话历史面板
-│   │   └── stores/        # 状态管理
-│   │       ├── taskStore.ts
-│   │       └── sessionStore.ts
+│   ├── skills/               # Skill 系统 (v0.5 新增)
+│   │   ├── skillManifest.ts   # SKILL.md 解析
+│   │   ├── skillLoader.ts     # 技能加载
+│   │   ├── skillRunner.ts     # 技能执行
+│   │   └── skillMarket.ts     # 技能市场
 │   │
-│   ├── agents/              # Agent框架 (v0.4 新增)
-│   │   ├── mainAgent.ts     # 主Agent - LangGraph ReAct
-│   │   ├── agentLogger.ts   # 日志记录
-│   │   └── subagents/       # 子Agent
-│   │       ├── baseSubAgent.ts
-│   │       └── browserSubAgent.ts
+│   ├── config/               # 配置模块
+│   │   ├── whitelistConfig.ts        # 白名单类型
+│   │   └── whitelistConfigStore.ts   # 白名单存储
 │   │
-│   ├── core/              # 核心业务逻辑
-│   │   ├── action/        # Action定义和验证
-│   │   │   ├── ActionSchema.ts
-│   │   │   └── ActionValidator.ts
-│   │   │
-│   │   ├── executor/      # 执行器
-│   │   │   ├── BrowserExecutor.ts    # 浏览器操作
-│   │   │   ├── CLIExecutor.ts
-│   │   │   └── ScreencastService.ts  # 实时截图服务
-│   │   │
-│   │   ├── planner/      # 任务规划
-│   │   │   ├── TaskPlanner.ts
-│   │   │   ├── PlanExecutor.ts
-│   │   │   └── Replanner.ts          # 动态重规划器
-│   │   │
-│   │   └── runtime/       # 运行时引擎
-│   │       ├── TaskEngine.ts
-│   │       └── TakeoverManager.ts
-│   │
-│   ├── checkpointers/       # 持久化 (v0.4 新增)
-│   │   └── agentCheckpointer.ts
-│   │
-│   ├── memory/             # 记忆系统 (v0.4 新增)
-│   │   └── agentMemory.ts
-│   │
-│   ├── preview/          # 预览管理
-│   │   └── PreviewManager.ts
-│   │
-│   ├── llm/              # LLM集成
-│   │   ├── config.ts
-│   │   └── OpenAIResponses.ts
-│   │
-│   └── config/           # 配置
-│       ├── whitelist.ts  # CLI白名单
-│       └── constants.ts   # 常量
-│
-├── config/
-│   └── llm.json          # LLM配置（用户填入）
+│   └── renderer/
+│       └── components/
+│           ├── HistoryPanel.tsx        # 任务历史面板
+│           ├── SkillPanel.tsx         # 技能管理面板
+│           └── WhitelistConfigPanel.tsx # 白名单配置面板
 │
 └── docs/
-    ├── USER_GUIDE.md     # 本文档
-    ├── PRD.md           # 产品需求
-    ├── SPEC_v0.4.md     # 技术规格 v0.4
-    └── CHANGELOG.md     # 变更日志
+    ├── USER_GUIDE.md         # 本文档
+    ├── CHANGELOG.md          # 变更日志
+    └── RELEASE_v0.5.0.md     # v0.5 发布说明
 ```
 
 ---
 
 ## 7. 常见问题
 
-### Q1: 启动报错 "Cannot find module"
+### Q1: TaskHistory 数据存储在哪里？
 
-**A**: 确保已运行 `npm install` 安装所有依赖。
+**A**: 默认存储在 `./history.db` 文件中，使用 SQLite 数据库。
 
-### Q2: LLM调用失败
-
-**A**: 检查 `config/llm.json` 中的API Key是否正确，网络是否正常。
-
-### Q3: 预览区域没有显示
+### Q2: 如何安装新的 Skill？
 
 **A**:
 
-1. 确认使用侧边栏模式（默认）
-2. 检查控制栏右侧的 👁 按钮是否选中
+1. 准备好包含 `SKILL.md` 的技能目录
+2. 打开 Skill 管理面板
+3. 点击"安装 Skill"按钮
+4. 输入技能目录的完整路径
 
-### Q4: 浏览器操作失败
+### Q3: Skill 不起作用怎么办？
 
 **A**:
 
-1. 检查网络连接
-2. 页面结构可能变化，AI会自动重试和重规划
+1. 确认 `SKILL.md` 文件存在且格式正确
+2. 检查触发关键词是否匹配
+3. 查看控制台是否有加载错误
 
-### Q5: 如何添加新的CLI命令白名单？
+### Q4: 白名单配置保存失败？
 
-**A**: 编辑 `src/config/whitelist.ts` 中的 `CLI_WHITELIST.commands` 对象。
+**A**:
 
----
-
-## 版本说明
-
-### v0.4 (2026-03-30)
-
-**架构升级 - LangChain/LangGraph 重构**
-
-**核心变更**:
-
-- ✅ **LangGraph Agent** - 使用 `createReactAgent` 标准化执行框架
-- ✅ **Memory Checkpointer** - 任务状态持久化
-- ✅ **Agent Memory** - 跨会话记忆系统
-- ✅ **本地日志** - `agentLogger` 替代 LangSmith
-- ✅ **SubAgent 框架** - 可扩展的子Agent架构
-
-**已实现**:
-
-- ✅ 浏览器自动化（goto/click/input/extract/screenshot）
-- ✅ CLI 执行（白名单）
-- ✅ 实时预览（8fps）
-- ✅ 人工接管
-- ✅ 会话持久化
-- ✅ 任务上下文理解
-- ✅ 搜索结果格式化显示
-
-**技术升级**:
-
-- ✅ `createReactAgent` 代替完整 StateGraph
-- ✅ `MemorySaver` 代替 SQLite Checkpointer
-- ✅ 本地 `agentLogger` 代替 LangSmith
+1. 检查配置格式是否正确
+2. 确认没有重复的主机名或命令
+3. 查看验证错误信息并修正
 
 ---
 
-### v0.2.3
+## 版本历史
 
-**新增功能**:
-
-- ✅ 元素滚动到视口 - 操作前自动滚动到元素位置
-- ✅ PressEnter 支持 - 输入后自动按 Enter 提交
-- ✅ 预览帧率提升 - 24fps 流畅预览
-
-**修复问题**:
-
-- ✅ 评论区输入失败 - 修复元素在页面下方无法找到
-- ✅ Enter 键时机 - 输入后等待 100ms 再按 Enter
-- ✅ 选择器解析 - 修复逗号分隔选择器未正确拆分
-- ✅ 任务队列冲突 - 防止多个任务并发执行
-- ✅ 选择器应用错误 - 只修改失败节点的选择器
-- ✅ IPC 重复注册 - 修复导致崩溃的问题
-- ✅ 页面结构增强 - 提取链接坐标帮助 LLM 理解页面
-- ✅ 登录弹窗检测 - 改为任务执行期间检测
-
-**已实现**:
-
-- ✅ 侧边栏实时预览（24fps）
-- ✅ 模式切换（侧边/独立窗口）
-- ✅ ask:user 用户交互
-- ✅ Replanner 自动恢复（LLM驱动）
-- ✅ 会话持久化
-- ✅ 浏览器自动化（6个动作）
-- ✅ 对话UI
-- ✅ 任务规划（LLM）
-- ✅ 人工接管机制
-- ✅ CLI基础执行（白名单）
-- ✅ UIGraph 语义层 - DOM转语义化元素图谱
-- ✅ Observer 页面观察者 - 失败后捕获页面状态
-- ✅ Verifier 验证层 - 验证每步执行结果
-- ✅ RecoveryEngine 恢复引擎 - LLM决策恢复策略
-- ✅ ShortTermMemory 短期记忆 - 记录轨迹用于学习
-- ✅ 任务上下文理解 - 基于前一个任务结果分析
-- ✅ 搜索结果格式化显示 - 自动清洗HTML并格式化列表
-- ✅ 登录弹窗检测（用户触发式）
-- ✅ 搜索后自动提取结果
-
-**未实现** (将在后续版本实现):
-
-- ❌ 测试覆盖
-- ❌ E2E测试
-- ❌ Vision Executor (OCR/图表解析)
-- ❌ 任务历史记录
-- ❌ 白名单配置UI
-- ❌ Skill系统
-- ❌ 定时任务系统
-- ❌ 多端协同
+- **v0.5** (2026-03-30) - TaskHistory + Skill System + WhitelistConfigUI
+- **v0.4** (2026-03-30) - LangChain/LangGraph 重构
+- **v0.3** (2026-03-29) - 工业级 Browser Agent 架构
+- **v0.2.3** (2026-03-29) - 元素滚动 + PressEnter 支持
 
 ---
 
-### v0.2.1
-
-**新增功能**:
-
-- ✅ 会话持久化 - 左侧会话面板，历史自动保存
-- ✅ LLM驱动重试 - 失败时LLM决策，最多3次重试
-
-**已实现**:
-
-- ✅ 侧边栏实时预览（8fps）
-- ✅ 模式切换（侧边/独立窗口）
-- ✅ ask:user 用户交互
-- ✅ Replanner 自动恢复
-- ✅ Selector 优化（force:true）
-- ✅ 浏览器自动化（6个动作）
-- ✅ 对话UI
-- ✅ 任务规划（LLM）
-- ✅ 人工接管机制
-- ✅ CLI基础执行（白名单）
-
-**未实现** (将在后续版本实现):
-
-- ❌ 测试覆盖
-- ❌ E2E测试
-- ❌ 多端协同
-
----
-
-## 反馈与支持
-
-如遇到问题，请：
-
-1. 查看控制台错误日志
-2. 检查 `config/llm.json` 配置
-3. 确认所有依赖已正确安装
-
----
-
-_OpenCowork v0.4_
+_OpenCowork v0.5_
 _最后更新: 2026-03-30_

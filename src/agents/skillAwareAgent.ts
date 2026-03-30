@@ -1,5 +1,5 @@
-import { getSkillLoader, SkillLoader } from '../skills/skillLoader';
-import { getSkillRunner, SkillRunner } from '../skills/skillRunner';
+import { SkillLoader } from '../skills/skillLoader';
+import { SkillRunner } from '../skills/skillRunner';
 import { InstalledSkill } from '../skills/skillManifest';
 
 export interface SkillAwareAgentConfig {

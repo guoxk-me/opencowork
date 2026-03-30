@@ -21,16 +21,28 @@ export class SkillMarket {
     }
     async installSkill(skillPath) {
         try {
-            const skillName = path.basename(skillPath);
-            const targetPath = path.join(this.skillsDir, skillName);
-            if (!fs.existsSync(this.skillsDir)) {
-                await fs.promises.mkdir(this.skillsDir, { recursive: true });
-            }
-            const stats = await fs.promises.stat(skillPath);
+            const resolvedPath = path.resolve(skillPath);
+            const manifestPath = path.join(resolvedPath, 'SKILL.md');
+            const stats = await fs.promises.stat(resolvedPath);
             if (!stats.isDirectory()) {
                 return { success: false, error: 'Source must be a directory' };
             }
-            await fs.promises.cp(skillPath, targetPath, { recursive: true });
+            const manifestStats = await fs.promises.stat(manifestPath).catch(() => null);
+            if (!manifestStats || !manifestStats.isFile()) {
+                return { success: false, error: 'Source directory must contain SKILL.md' };
+            }
+            if (!fs.existsSync(this.skillsDir)) {
+                await fs.promises.mkdir(this.skillsDir, { recursive: true });
+            }
+            const skillName = path.basename(resolvedPath);
+            const targetPath = path.join(this.skillsDir, skillName);
+            if (fs.existsSync(targetPath)) {
+                return {
+                    success: false,
+                    error: 'Skill with this name already exists. Please uninstall first.',
+                };
+            }
+            await fs.promises.cp(resolvedPath, targetPath, { recursive: true });
             this.loader.clearCache();
             return { success: true };
         }
@@ -60,7 +72,16 @@ export class SkillMarket {
         }
     }
     async updateSkill(skillName) {
-        return { success: false, error: 'Update not implemented' };
+        try {
+            const skill = await this.loader.getSkill(skillName);
+            if (!skill) {
+                return { success: false, error: 'Skill not found' };
+            }
+            return { success: false, error: 'Update not implemented - please uninstall and reinstall' };
+        }
+        catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : String(error) };
+        }
     }
     async getSkillInfo(skillName) {
         const skill = await this.loader.getSkill(skillName);

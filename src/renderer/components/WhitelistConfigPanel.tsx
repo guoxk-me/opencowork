@@ -65,15 +65,23 @@ export function WhitelistConfigPanel({ isOpen, onClose }: WhitelistConfigPanelPr
     }
   };
 
-  const updateCLICommand = (index: number, updates: Partial<CLICommandWhitelist>) => {
-    const newCommands = [...config.cli.commands];
-    newCommands[index] = { ...newCommands[index], ...updates };
-    setConfig({ ...config, cli: { ...config.cli, commands: newCommands } });
-  };
+  function updatePathEntryWithPermissions(
+    entry: PathWhitelist,
+    updates: Partial<PathWhitelist>
+  ): PathWhitelist {
+    if (updates.permissions) {
+      return {
+        ...entry,
+        ...updates,
+        permissions: { ...entry.permissions, ...updates.permissions },
+      };
+    }
+    return { ...entry, ...updates };
+  }
 
   const updatePathEntry = (index: number, updates: Partial<PathWhitelist>) => {
     const newEntries = [...config.paths.entries];
-    newEntries[index] = { ...newEntries[index], ...updates };
+    newEntries[index] = updatePathEntryWithPermissions(newEntries[index], updates);
     setConfig({ ...config, paths: { ...config.paths, entries: newEntries } });
   };
 
@@ -81,6 +89,12 @@ export function WhitelistConfigPanel({ isOpen, onClose }: WhitelistConfigPanelPr
     const newTools = [...config.agents.tools];
     newTools[index] = { ...newTools[index], ...updates };
     setConfig({ ...config, agents: { ...config.agents, tools: newTools } });
+  };
+
+  const updateCLICommand = (index: number, updates: Partial<CLICommandWhitelist>) => {
+    const newCommands = [...config.cli.commands];
+    newCommands[index] = { ...newCommands[index], ...updates };
+    setConfig({ ...config, cli: { ...config.cli, commands: newCommands } });
   };
 
   const getRiskLevelBadgeClass = (riskLevel: RiskLevel) => {

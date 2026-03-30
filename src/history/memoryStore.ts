@@ -1,5 +1,24 @@
 import { TaskHistoryRecord } from './taskHistory';
 
+function deepClone<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => deepClone(item)) as unknown as T;
+  }
+  if (obj instanceof Date) {
+    return new Date(obj.getTime()) as unknown as T;
+  }
+  const cloned = {} as T;
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      cloned[key] = deepClone(obj[key]);
+    }
+  }
+  return cloned;
+}
+
 export class MemoryStore {
   private store: Map<string, TaskHistoryRecord> = new Map();
   private namespace: string[] = [];
@@ -10,13 +29,13 @@ export class MemoryStore {
 
   async put(namespace: string[], key: string, value: TaskHistoryRecord): Promise<void> {
     const fullKey = this.makeKey(namespace, key);
-    this.store.set(fullKey, { ...value });
+    this.store.set(fullKey, deepClone(value));
   }
 
   async get(namespace: string[], key: string): Promise<TaskHistoryRecord | null> {
     const fullKey = this.makeKey(namespace, key);
     const value = this.store.get(fullKey);
-    return value ? { ...value } : null;
+    return value ? deepClone(value) : null;
   }
 
   async delete(namespace: string[], key: string): Promise<void> {
@@ -35,7 +54,7 @@ export class MemoryStore {
     for (const [key, value] of this.store.entries()) {
       if (key.startsWith(prefix)) {
         if (filter(value)) {
-          results.push({ ...value });
+          results.push(deepClone(value));
         }
       }
     }
@@ -51,7 +70,7 @@ export class MemoryStore {
 
     for (const [key, value] of this.store.entries()) {
       if (key.startsWith(prefix)) {
-        results.push({ ...value });
+        results.push(deepClone(value));
       }
     }
 

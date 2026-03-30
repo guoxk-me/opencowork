@@ -4,6 +4,9 @@ import { parseSkillFrontmatter, validateSkillManifest, } from './skillManifest';
 export class SkillLoader {
     skillsDirs;
     manifestCache = new Map();
+    skillsCache = null;
+    skillsCacheTime = 0;
+    CACHE_TTL_MS = 5000;
     constructor(skillsDirs) {
         this.skillsDirs = skillsDirs || this.getDefaultSkillDirs();
     }
@@ -15,10 +18,21 @@ export class SkillLoader {
         ];
     }
     async loadSkill(skillPath) {
+        const resolvedPath = path.resolve(skillPath);
+        const isPathAllowed = this.skillsDirs.some((dir) => {
+            const resolvedDir = path.resolve(dir);
+            return resolvedPath.startsWith(resolvedDir + path.sep) || resolvedPath === resolvedDir;
+        });
+        if (!isPathAllowed) {
+            throw new Error(`Skill path "${skillPath}" is not within allowed skills directories: ${this.skillsDirs.join(', ')}`);
+        }
         const manifestPath = path.join(skillPath, 'SKILL.md');
         const stats = await fs.promises.stat(manifestPath).catch(() => null);
         if (!stats || !stats.isFile()) {
             throw new Error(`SKILL.md not found at ${manifestPath}`);
+        }
+        if (stats.size > 1024 * 1024) {
+            throw new Error(`SKILL.md at ${manifestPath} exceeds maximum size of 1MB`);
         }
         const content = await fs.promises.readFile(manifestPath, 'utf-8');
         const { frontmatter, body } = parseSkillFrontmatter(content);
@@ -49,7 +63,9 @@ export class SkillLoader {
             skill.version = pkg.version;
             skill.author = pkg.author;
         }
-        catch { }
+        catch (e) {
+            console.debug(`[SkillLoader] No package.json for skill ${name}`);
+        }
         return skill;
     }
     parseTriggers(frontmatter) {
@@ -78,6 +94,10 @@ export class SkillLoader {
         return undefined;
     }
     async loadAllSkills() {
+        const now = Date.now();
+        if (this.skillsCache && now - this.skillsCacheTime < this.CACHE_TTL_MS) {
+            return this.skillsCache;
+        }
         const skills = [];
         const seen = new Set();
         for (const dir of this.skillsDirs) {
@@ -98,8 +118,12 @@ export class SkillLoader {
                     }
                 }
             }
-            catch (e) { }
+            catch (e) {
+                console.warn(`[SkillLoader] Failed to read skills directory ${dir}:`, e);
+            }
         }
+        this.skillsCache = skills;
+        this.skillsCacheTime = now;
         return skills;
     }
     async matchSkill(userInput) {
@@ -112,14 +136,18 @@ export class SkillLoader {
             const bPriority = b.manifest.triggers?.[0]?.priority || 50;
             return bPriority - aPriority;
         });
-        if (matched.length > 0) {
-            const topMatch = matched[0];
-            if (topMatch.manifest.triggers?.[0]?.exclusive) {
-                return topMatch;
-            }
-            return matched[0];
+        if (matched.length === 0) {
+            return null;
         }
-        return null;
+        const topMatch = matched[0];
+        if (topMatch.manifest.triggers?.[0]?.exclusive) {
+            return topMatch;
+        }
+        const hasExclusiveMatch = matched.some((s) => s.manifest.triggers?.[0]?.exclusive);
+        if (hasExclusiveMatch) {
+            return null;
+        }
+        return matched[0];
     }
     matchesTrigger(skill, input) {
         const triggers = skill.manifest.triggers;
@@ -146,6 +174,9 @@ export class SkillLoader {
         return false;
     }
     async getSkill(name) {
+        if (this.skillsCache) {
+            return this.skillsCache.find((s) => s.manifest.name === name) || null;
+        }
         if (this.manifestCache.has(name)) {
             const manifest = this.manifestCache.get(name);
             return {
@@ -168,6 +199,8 @@ export class SkillLoader {
     }
     clearCache() {
         this.manifestCache.clear();
+        this.skillsCache = null;
+        this.skillsCacheTime = 0;
     }
 }
 let skillLoaderInstance = null;
