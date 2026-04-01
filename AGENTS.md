@@ -454,6 +454,35 @@ describe('CLIExecutor', () => {
 
 ---
 
+### 2026-04-01 第七轮代码审核修复 (v0.7.1)
+
+#### P0 关键问题修复
+
+| 问题 | 文件                                   | 修复内容                                                  |
+| ---- | -------------------------------------- | --------------------------------------------------------- |
+| P0-1 | `scheduler/scheduler.ts`               | 添加 oneTimeTimers Map，使用 clearTimeout 清除 setTimeout |
+| P0-2 | `core/runtime/TaskEngine.ts:760-786`   | waitForUserConfirm catch 块添加 resolve()                 |
+| P0-3 | `core/executor/AskUserExecutor.ts`     | pendingRequests 改为模块级共享 Map                        |
+| P0-4 | `core/planner/PlanExecutor.ts:246-265` | waitForResume 添加 settled 标志防止超时后继续轮询         |
+| P0-5 | `core/planner/PlanExecutor.ts:312`     | getBrowserPage 添加 null 检查                             |
+
+#### P1 功能问题修复
+
+| 问题 | 文件                                 | 修复内容                                                      |
+| ---- | ------------------------------------ | ------------------------------------------------------------- |
+| P1-1 | `main/ipcHandlers.ts:104-116`        | 初始化超时返回错误而非继续执行                                |
+| P1-2 | `main/ipcHandlers.ts:118`            | 添加 agent 非空检查                                           |
+| P1-3 | `history/historyStore.ts:26-41`      | scheduleSqliteSync 改为 async，批量写入时 await flushToSqlite |
+| P1-4 | `core/runtime/TaskEngine.ts:473-476` | executePlan catch 添加 throw error (待验证)                   |
+
+#### P2 代码质量修复
+
+| 问题 | 文件                                   | 修复内容                        |
+| ---- | -------------------------------------- | ------------------------------- |
+| P2-1 | `core/planner/PlanExecutor.ts:304-306` | cleanup() 添加 stopScreencast() |
+
+---
+
 ## GitHub Workflow
 
 ### Repository

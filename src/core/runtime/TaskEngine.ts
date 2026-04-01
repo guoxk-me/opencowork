@@ -772,6 +772,8 @@ export class TaskEngine {
           }
         } catch (e) {
           console.warn('[TaskEngine] User confirm check error:', e);
+          this.clearUserConfirm();
+          resolve();
         }
       }, 1000);
 

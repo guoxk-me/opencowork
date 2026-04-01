@@ -33,6 +33,7 @@ export class Scheduler extends EventEmitter {
   private taskExecutor: TaskExecutor;
   private cronJobs: Map<string, cron.ScheduledTask> = new Map();
   private intervalTimers: Map<string, NodeJS.Timeout> = new Map();
+  private oneTimeTimers: Map<string, NodeJS.Timeout> = new Map();
   private isRunning = false;
 
   constructor(config: Partial<SchedulerConfig> = {}) {
@@ -123,6 +124,11 @@ export class Scheduler extends EventEmitter {
       clearInterval(timer);
     }
     this.intervalTimers.clear();
+
+    for (const [id, timer] of this.oneTimeTimers) {
+      clearTimeout(timer);
+    }
+    this.oneTimeTimers.clear();
 
     this.taskQueue.stop();
 
@@ -233,10 +239,10 @@ export class Scheduler extends EventEmitter {
       } catch (error) {
         console.error('[Scheduler] One-time task enqueue failed:', error);
       }
-      this.intervalTimers.delete(task.id);
+      this.oneTimeTimers.delete(task.id);
     }, delay);
 
-    this.intervalTimers.set(task.id, timer);
+    this.oneTimeTimers.set(task.id, timer);
   }
 
   private async unscheduleTask(id: string): Promise<void> {
@@ -250,6 +256,12 @@ export class Scheduler extends EventEmitter {
     if (intervalTimer) {
       clearInterval(intervalTimer);
       this.intervalTimers.delete(id);
+    }
+
+    const oneTimeTimer = this.oneTimeTimers.get(id);
+    if (oneTimeTimer) {
+      clearTimeout(oneTimeTimer);
+      this.oneTimeTimers.delete(id);
     }
   }
 

@@ -111,11 +111,22 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
             ),
           ]);
         } catch (timeoutError) {
-          console.warn('[IPC] Agent init wait timeout, continuing anyway');
+          console.error('[IPC] Agent init wait timeout');
+          return {
+            success: false,
+            error: 'Agent initialization timeout',
+          };
         }
       }
 
-      const agent = sharedMainAgent!;
+      const agent = sharedMainAgent;
+      if (!agent) {
+        console.error('[IPC] Agent not initialized');
+        return {
+          success: false,
+          error: 'Agent initialization failed',
+        };
+      }
       if (threadId) {
         agent.setThreadId(threadId);
         sharedThreadId = threadId;

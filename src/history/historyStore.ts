@@ -20,14 +20,14 @@ export class HistoryStore {
 
   async saveTask(record: TaskHistoryRecord): Promise<void> {
     await this.memoryStore.put(['current'], `task_${record.id}`, record);
-    this.scheduleSqliteSync(record);
+    await this.scheduleSqliteSync(record);
   }
 
-  private scheduleSqliteSync(record: TaskHistoryRecord): void {
+  private async scheduleSqliteSync(record: TaskHistoryRecord): Promise<void> {
     this.pendingSqliteWrites.push(record);
 
     if (this.pendingSqliteWrites.length >= MAX_PENDING_WRITES) {
-      this.flushToSqlite();
+      await this.flushToSqlite();
       return;
     }
 

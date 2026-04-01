@@ -680,7 +680,7 @@ ${htmlSnippet}
   }
 
   getPage() {
-    return this.page;
+    return this.page || null;
   }
 
   async getScreenshot(): Promise<string | null> {

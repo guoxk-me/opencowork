@@ -245,14 +245,17 @@ export class PlanExecutor {
 
   private async waitForResume(): Promise<void> {
     const TIMEOUT_MS = 300000;
+    let settled = false;
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const timeoutId = setTimeout(() => {
+        settled = true;
         console.warn('[PlanExecutor] waitForResume timeout after 5 minutes');
         resolve();
       }, TIMEOUT_MS);
 
       const check = () => {
+        if (settled) return;
         if (!this.paused) {
           clearTimeout(timeoutId);
           resolve();
@@ -302,6 +305,7 @@ export class PlanExecutor {
   }
 
   async cleanup(): Promise<void> {
+    this.stopScreencast();
     await this.router.cleanup();
   }
 
@@ -310,7 +314,8 @@ export class PlanExecutor {
   }
 
   getBrowserPage() {
-    return this.router.browserExecutor.getPage();
+    if (!this.router?.browserExecutor) return null;
+    return this.router.browserExecutor.getPage() || null;
   }
 }
 
