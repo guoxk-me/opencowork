@@ -79,7 +79,11 @@ export class Observer {
     const removed = previous.elements.filter((e) => !currentIds.has(e.id));
     const changed = current.elements.filter((e) => {
       const prev = previous.elements.find((p) => p.id === e.id);
-      return prev && JSON.stringify(prev) !== JSON.stringify(e);
+      if (!prev) return false;
+      // 比较关键字段
+      const prevStr = `${prev.role || ''}${prev.label || ''}${prev.selector || ''}`;
+      const currStr = `${e.role || ''}${e.label || ''}${e.selector || ''}`;
+      return prevStr !== currStr;
     });
 
     console.log(`[Observer] Diff: +${added.length}, -${removed.length}, ~${changed.length}`);

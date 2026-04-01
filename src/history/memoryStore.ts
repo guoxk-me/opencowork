@@ -34,10 +34,12 @@ export class MemoryStore {
   async put(namespace: string[], key: string, value: TaskHistoryRecord): Promise<void> {
     if (this.store.size >= this.maxSize) {
       const oldestKey = this.store.keys().next().value;
-      if (oldestKey) {
-        this.store.delete(oldestKey);
-        console.log('[MemoryStore] Max size reached, evicted oldest record');
+      if (!oldestKey) {
+        console.warn('[MemoryStore] No oldest key to evict');
+        return;
       }
+      this.store.delete(oldestKey);
+      console.log('[MemoryStore] Max size reached, evicted oldest record');
     }
     const fullKey = this.makeKey(namespace, key);
     this.store.set(fullKey, deepClone(value));

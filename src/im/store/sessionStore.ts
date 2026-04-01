@@ -34,7 +34,7 @@ class SessionStateMachine extends EventEmitter {
         console.log('[SessionStateMachine] Max size reached, removed oldest session');
       }
     }
-    const sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sessionId = `sess_${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
     const session: SessionContext = {
       sessionId,
       userId,

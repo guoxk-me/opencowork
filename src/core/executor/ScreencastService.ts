@@ -1,17 +1,17 @@
 import { BrowserWindow } from 'electron';
 
 export interface ScreencastConfig {
-  fps: number;              // 帧率，默认 5
-  quality: number;         // 图片质量 0-100，默认 60
-  maxWidth: number;        // 最大宽度，默认 800
-  maxHeight: number;       // 最大高度，默认 450
+  fps: number; // 帧率，默认 5
+  quality: number; // 图片质量 0-100，默认 60
+  maxWidth: number; // 最大宽度，默认 800
+  maxHeight: number; // 最大高度，默认 450
 }
 
 const DEFAULT_CONFIG: ScreencastConfig = {
-  fps: 24,        // 默认 fps
-  quality: 20,    // 降低质量提高压缩率
-  maxWidth: 800,  // 降低分辨率
-  maxHeight: 0,  // 0 表示不限制高度，由 CSS 自动填充
+  fps: 24, // 默认 fps
+  quality: 20, // 降低质量提高压缩率
+  maxWidth: 800, // 降低分辨率
+  maxHeight: 0, // 0 表示使用 CSS 自动填充高度
 };
 
 export class ScreencastService {
@@ -42,7 +42,7 @@ export class ScreencastService {
       console.log('[Screencast] Already running');
       return;
     }
-    
+
     if (!this.page || !this.mainWindow) {
       console.log('[Screencast] Cannot start: missing page or mainWindow');
       return;
@@ -52,7 +52,9 @@ export class ScreencastService {
     this.isRunning = true;
     this.frameCount = 0;
 
-    console.log(`[Screencast] Starting with ${this.config.fps}fps, quality ${this.config.quality}%`);
+    console.log(
+      `[Screencast] Starting with ${this.config.fps}fps, quality ${this.config.quality}%`
+    );
 
     this.intervalId = setInterval(async () => {
       await this.captureFrame();
@@ -80,7 +82,7 @@ export class ScreencastService {
 
   private async updatePageContent(): Promise<void> {
     if (!this.page) return;
-    
+
     try {
       this.pageContent = await this.page.content();
     } catch (error) {
@@ -105,7 +107,7 @@ export class ScreencastService {
       });
 
       const base64 = Buffer.from(screenshot).toString('base64');
-      
+
       this.frameCount++;
       this.lastFrameTime = Date.now();
 
@@ -116,8 +118,8 @@ export class ScreencastService {
       if (this.frameCount % 30 === 0) {
         console.log(`[Screencast] Sent ${this.frameCount} frames, last at ${Date.now()}`);
       }
-    } catch (error) {
-      // 静默处理错误，避免频繁打印
+    } catch (error: any) {
+      console.warn('[Screencast] Capture frame failed:', error?.message || error);
     }
   }
 

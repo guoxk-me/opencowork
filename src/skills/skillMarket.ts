@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { InstalledSkill } from './skillManifest';
 import { SkillLoader, getSkillLoader } from './skillLoader';
 
 export interface SkillListing {

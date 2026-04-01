@@ -1,5 +1,3 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { execFile } from 'child_process';
 import { InstalledSkill, SkillExecutionContext } from './skillManifest';
 
@@ -94,6 +92,8 @@ export class SkillRunner {
     skill: InstalledSkill,
     context: SkillExecutionContext
   ): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _ctx = context;
     const lines = content.split('\n');
     const outputs: string[] = [];
     const shell = skill.manifest.frontmatter.shell === 'powershell' ? 'powershell' : 'bash';
