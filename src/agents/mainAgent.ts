@@ -13,7 +13,7 @@ import { getCheckpointer, AgentCheckpointer } from '../checkpointers/agentCheckp
 import { getLogger, LoggerConfig } from './agentLogger';
 import { getBrowserExecutor } from '../main/ipcHandlers';
 import { getCLIExecutor } from '../main/ipcHandlers';
-import { ActionType } from '../core/action/ActionSchema';
+import { ActionType, generateId } from '../core/action/ActionSchema';
 import { loadLLMConfig } from '../llm/config';
 
 function cleanHtmlText(text: string): string {
@@ -140,7 +140,7 @@ const browserTool = tool(
             params.selector
           );
           result = await executor.execute({
-            id: `browser-input-${Date.now()}`,
+            id: generateId(),
             type: ActionType.BROWSER_INPUT,
             description: 'Input text',
             params: { selector: params.selector, text: params.text || '', clear: true },
@@ -160,7 +160,7 @@ const browserTool = tool(
             params.selector
           );
           result = await executor.execute({
-            id: `browser-wait-${Date.now()}`,
+            id: generateId(),
             type: ActionType.BROWSER_WAIT,
             description: 'Wait for element',
             params: { selector: params.selector, timeout: params.timeout || 10000 },
@@ -180,7 +180,7 @@ const browserTool = tool(
             params.selector
           );
           result = await executor.execute({
-            id: `browser-extract-${Date.now()}`,
+            id: generateId(),
             type: ActionType.BROWSER_EXTRACT,
             description: 'Extract content',
             params: { selector: params.selector, type: 'text', multiple: true },
@@ -201,7 +201,7 @@ const browserTool = tool(
           agent?.sendNodeStart('browser', 'screenshot', {});
           logger.logToolCall('browser', { action: 'screenshot' }, 'main-agent', 'screenshot');
           result = await executor.execute({
-            id: `browser-screenshot-${Date.now()}`,
+            id: generateId(),
             type: ActionType.BROWSER_SCREENSHOT,
             description: 'Take screenshot',
             params: {},
@@ -281,7 +281,7 @@ const cliTool = tool(
     try {
       const executor = getCLIExecutor();
       const result = await executor.execute({
-        id: `cli-${Date.now()}`,
+        id: generateId(),
         type: ActionType.CLI_EXECUTE,
         description: `Execute CLI: ${params.command}`,
         params: {

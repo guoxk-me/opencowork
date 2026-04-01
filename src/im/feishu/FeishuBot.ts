@@ -14,6 +14,7 @@ import {
 
 export interface FeishuConfig extends IMConfig {
   webhookUrl?: string;
+  tokenRefreshBefore?: number;
 }
 
 export class FeishuBot implements IMBot {
@@ -22,12 +23,13 @@ export class FeishuBot implements IMBot {
   private messageHandler?: (msg: IMMessage) => void;
   private tenantAccessToken: string | null = null;
   private tokenExpireTime: number = 0;
-  private readonly TOKEN_REFRESH_BEFORE = 300000;
+  private readonly TOKEN_REFRESH_BEFORE: number;
   private readonly DEFAULT_TIMEOUT = 30000;
   private axiosInstance: AxiosInstance;
 
   constructor(config: FeishuConfig) {
     this.config = config;
+    this.TOKEN_REFRESH_BEFORE = config.tokenRefreshBefore ?? 300000;
     this.axiosInstance = axios.create({
       timeout: this.DEFAULT_TIMEOUT,
     });

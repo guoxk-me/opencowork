@@ -308,7 +308,7 @@ export class DispatchService extends EventEmitter {
   }
 
   private generateTaskId(): string {
-    return `ft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    return `ft_${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 }
 
