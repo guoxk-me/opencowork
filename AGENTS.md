@@ -529,6 +529,78 @@ describe('CLIExecutor', () => {
 
 ---
 
+### 2026-04-01 第八轮代码审核修复 (v0.7.4)
+
+#### P1 功能问题修复
+
+| 问题 | 文件                                  | 修复内容                    |
+| ---- | ------------------------------------- | --------------------------- |
+| P1-1 | `core/planner/TaskPlanner.ts:188-194` | LLM 调用添加 2 分钟超时保护 |
+
+#### P2 代码质量修复
+
+| 问题 | 文件                                | 修复内容                                  |
+| ---- | ----------------------------------- | ----------------------------------------- |
+| P2-1 | `preview/PreviewManager.ts:291-301` | navigateTo 添加 isDestroyed 检查          |
+| P2-2 | `agents/agentLogger.ts:399-407`     | exportToFile 失败时 throw 错误            |
+| P2-3 | `core/executor/CLIExecutor.ts:14`   | 移除 cat: ['*'] 通配符                    |
+| P2-4 | `core/planner/Replanner.ts:330`     | validateSelector 添加 eslint-disable 注释 |
+
+---
+
+### 2026-04-01 第八轮代码审核修复 - 续 (v0.7.5)
+
+#### P2 代码质量修复
+
+| 问题 | 文件                                 | 修复内容                          |
+| ---- | ------------------------------------ | --------------------------------- |
+| P2-1 | `agents/mainAgent.ts`                | 使用 generateId() 替代 Date.now() |
+| P2-2 | `im/DispatchService.ts:311`          | 扩展随机字符串长度 (8→10)         |
+| P2-3 | `im/feishu/FeishuBot.ts:25`          | tokenRefreshBefore 可通过配置设置 |
+| P2-4 | `core/executor/ExecutorRouter.ts:64` | 添加 CLI 清理注释                 |
+
+---
+
+### 2026-04-01 第九轮代码审核修复 (v0.7.6)
+
+#### P1 功能问题修复
+
+| 问题 | 文件                        | 修复内容                         |
+| ---- | --------------------------- | -------------------------------- |
+| P1-1 | `skills/skillRunner.ts:1-2` | 移除未使用的 fs, path 导入       |
+| P1-2 | `skills/skillMarket.ts:3`   | 移除未使用的 InstalledSkill 导入 |
+
+#### P2 代码质量修复
+
+| 问题 | 文件                           | 修复内容                                    |
+| ---- | ------------------------------ | ------------------------------------------- |
+| P2-1 | `ScreencastService.ts:119-121` | captureFrame 添加日志                       |
+| P2-2 | `ScreencastService.ts:14`      | 修正 maxHeight 注释                         |
+| P2-3 | `history/memoryStore.ts:36`    | oldestKey 添加 undefined 检查               |
+| P2-4 | `browser/observer.ts:82`       | captureDiff 使用字段比较替代 JSON.stringify |
+| P2-5 | `im/store/sessionStore.ts:37`  | 扩展 session ID 随机字符串长度              |
+
+---
+
+### 2026-04-01 第十轮代码审核
+
+**结果**: 未发现任何新问题 - 代码库质量已达到较高标准
+
+---
+
+## 代码审核汇总
+
+| 轮次     | 发现问题 | 修复数量 | Tag          |
+| -------- | -------- | -------- | ------------ |
+| 1-6      | 103      | 64       | v0.7.0-0.7.5 |
+| 7        | 29       | 18       | v0.7.2-0.7.3 |
+| 8        | 10       | 10       | v0.7.4-0.7.5 |
+| 9        | 7        | 7        | v0.7.6       |
+| 10       | 0        | 0        | -            |
+| **总计** | **149**  | **99**   | -            |
+
+---
+
 ## GitHub Workflow
 
 ### Repository
