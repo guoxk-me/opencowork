@@ -292,6 +292,10 @@ export class PreviewManager {
     this.currentUrl = url;
     if (this.previewView) {
       try {
+        if (this.previewView.webContents.isDestroyed()) {
+          console.warn('[PreviewManager] Preview view already destroyed');
+          return;
+        }
         await this.previewView.webContents.loadURL(url);
       } catch (e) {
         console.error('[PreviewManager] Failed to navigate:', e);

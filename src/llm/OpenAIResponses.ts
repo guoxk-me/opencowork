@@ -1,6 +1,12 @@
 import { LLMClient, LLMMessage, LLMResponse } from './LLMClient';
 import { getLLMConfig } from './config';
 
+interface ChatRequestBody {
+  model: string;
+  messages: LLMMessage[];
+  reasoning_effort?: string;
+}
+
 export class OpenAIResponsesClient implements LLMClient {
   private config = getLLMConfig();
   private baseUrl: string;
@@ -18,7 +24,7 @@ export class OpenAIResponsesClient implements LLMClient {
   async chat(messages: LLMMessage[]): Promise<LLMResponse> {
     const url = `${this.baseUrl}/chat/completions`;
 
-    const body: any = {
+    const body: ChatRequestBody = {
       model: this.model,
       messages: messages,
       reasoning_effort: 'medium',
@@ -39,7 +45,7 @@ export class OpenAIResponsesClient implements LLMClient {
     return this.chat([{ role: 'user', content: prompt }]);
   }
 
-  private async makeRequest(url: string, body: any): Promise<any> {
+  private async makeRequest(url: string, body: ChatRequestBody): Promise<any> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 

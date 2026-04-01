@@ -12,7 +12,7 @@ const CLI_WHITELIST: Record<string, string[]> = {
   ls: ['-la', '-l', '-a', '-R'],
   pwd: [],
   echo: ['*'],
-  cat: ['*'],
+  cat: [],
   mkdir: ['-p'],
   cd: [],
   touch: ['*'],

@@ -510,6 +510,25 @@ describe('CLIExecutor', () => {
 
 ---
 
+### 2026-04-01 第八轮代码审核修复 (v0.7.4)
+
+#### P1 功能问题修复
+
+| 问题 | 文件                                  | 修复内容                    |
+| ---- | ------------------------------------- | --------------------------- |
+| P1-1 | `core/planner/TaskPlanner.ts:188-194` | LLM 调用添加 2 分钟超时保护 |
+
+#### P2 代码质量修复
+
+| 问题 | 文件                                | 修复内容                                  |
+| ---- | ----------------------------------- | ----------------------------------------- |
+| P2-1 | `preview/PreviewManager.ts:291-301` | navigateTo 添加 isDestroyed 检查          |
+| P2-2 | `agents/agentLogger.ts:399-407`     | exportToFile 失败时 throw 错误            |
+| P2-3 | `core/executor/CLIExecutor.ts:14`   | 移除 cat: ['*'] 通配符                    |
+| P2-4 | `core/planner/Replanner.ts:330`     | validateSelector 添加 eslint-disable 注释 |
+
+---
+
 ## GitHub Workflow
 
 ### Repository

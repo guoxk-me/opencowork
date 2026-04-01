@@ -402,6 +402,7 @@ class AgentLogger {
       fs.writeFileSync(targetPath, this.exportLogs(), 'utf-8');
     } catch (err) {
       console.error('[AgentLogger] Failed to export to file:', err);
+      throw err;
     }
     return targetPath;
   }

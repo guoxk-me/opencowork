@@ -190,8 +190,14 @@ ${context.previousTaskResult.content.substring(0, 500)}`
         { role: 'user', content: userPrompt },
       ];
 
+      const LLM_TIMEOUT_MS = 120000;
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('LLM planning timeout after 2 minutes')), LLM_TIMEOUT_MS)
+      );
+
       console.log('[TaskPlanner] Calling LLM...');
-      const response = await llm.chat(messages);
+      const response = await Promise.race([llm.chat(messages), timeoutPromise]);
 
       console.log('[TaskPlanner] LLM response:', response.content);
 

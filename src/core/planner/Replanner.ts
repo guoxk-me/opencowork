@@ -327,6 +327,8 @@ ${pageContent.substring(0, 8000)}
     };
   }
 
+  // 保留 validateSelector 供外部使用（如果有需要）
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async validateSelector(selector: string, pageContent?: string): Promise<boolean> {
     if (!selector) return false;
 
