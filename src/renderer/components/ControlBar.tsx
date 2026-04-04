@@ -162,7 +162,14 @@ export function ControlBar({ onSkillClick }: ControlBarProps) {
           定时
         </button>
 
-        <button onClick={onSkillClick} className="btn btn-secondary" title="技能管理">
+        <button
+          onClick={() => {
+            console.log('技能按钮被点击');
+            onSkillClick();
+          }}
+          className="btn btn-secondary"
+          title="技能管理"
+        >
           技能
         </button>
 

@@ -306,19 +306,37 @@ export const IPC_HANDLERS = {
     },
     // 定时任务相关 (v0.6)
     'scheduler:list': async () => {
-        const { getScheduler } = await import('../scheduler/scheduler.js');
-        const scheduler = getScheduler();
-        return await scheduler.getAllTasks();
+        try {
+            const { getScheduler } = await import('../scheduler/scheduler.js');
+            const scheduler = getScheduler();
+            console.log('[IPC] scheduler:list - scheduler tasks count:', scheduler.getAllTasks.toString());
+            const tasks = await scheduler.getAllTasks();
+            console.log('[IPC] scheduler:list returning tasks:', tasks?.length, JSON.stringify(tasks).substring(0, 100));
+            return tasks;
+        }
+        catch (error) {
+            console.error('[IPC] scheduler:list error:', error);
+            return [];
+        }
+    },
+    'scheduler:create': async (mainWindow, previewWindow, task) => {
+        try {
+            const { getScheduler } = await import('../scheduler/scheduler.js');
+            const scheduler = getScheduler();
+            console.log('[IPC] scheduler:create - task:', JSON.stringify(task).substring(0, 100));
+            const result = await scheduler.addTask(task);
+            console.log('[IPC] scheduler:create - result:', JSON.stringify(result).substring(0, 100));
+            return result;
+        }
+        catch (error) {
+            console.error('[IPC] scheduler:create error:', error);
+            return { success: false, error: String(error) };
+        }
     },
     'scheduler:get': async (mainWindow, previewWindow, { id }) => {
         const { getScheduler } = await import('../scheduler/scheduler.js');
         const scheduler = getScheduler();
         return await scheduler.getTask(id);
-    },
-    'scheduler:create': async (mainWindow, previewWindow, task) => {
-        const { getScheduler } = await import('../scheduler/scheduler.js');
-        const scheduler = getScheduler();
-        return await scheduler.addTask(task);
     },
     'scheduler:update': async (mainWindow, previewWindow, { id, updates }) => {
         const { getScheduler } = await import('../scheduler/scheduler.js');
@@ -438,6 +456,104 @@ export const IPC_HANDLERS = {
         }
         catch (error) {
             console.error('[IPC] feishu:bind error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    // 历史记录相关 (v0.8)
+    'history:list': async (mainWindow, previewWindow, { options }) => {
+        try {
+            const { getHistoryService } = await import('../history/historyService.js');
+            const historyService = getHistoryService();
+            const tasks = await historyService.listTasks(options || {});
+            return { data: tasks, total: tasks.length };
+        }
+        catch (error) {
+            console.error('[IPC] history:list error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    'history:get': async (mainWindow, previewWindow, { taskId }) => {
+        try {
+            const { getHistoryService } = await import('../history/historyService.js');
+            const historyService = getHistoryService();
+            const task = await historyService.getTask(taskId);
+            return { data: task };
+        }
+        catch (error) {
+            console.error('[IPC] history:get error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    'history:delete': async (mainWindow, previewWindow, { taskId }) => {
+        try {
+            const { getHistoryService } = await import('../history/historyService.js');
+            const historyService = getHistoryService();
+            await historyService.deleteTask(taskId);
+            return { success: true };
+        }
+        catch (error) {
+            console.error('[IPC] history:delete error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    'history:replay': async (mainWindow, previewWindow, { taskId }) => {
+        try {
+            const { getHistoryService } = await import('../history/historyService.js');
+            const historyService = getHistoryService();
+            const result = await historyService.replayTask(taskId);
+            return { success: true, data: result };
+        }
+        catch (error) {
+            console.error('[IPC] history:replay error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    'skill:list': async (mainWindow, previewWindow) => {
+        try {
+            const { SkillMarket } = await import('../skills/skillMarket.js');
+            const market = new SkillMarket();
+            const skills = await market.listInstalledSkills();
+            return skills;
+        }
+        catch (error) {
+            console.error('[IPC] skill:list error:', error);
+            return [];
+        }
+    },
+    'skill:install': async (mainWindow, previewWindow, { path: skillPath }) => {
+        try {
+            const { SkillMarket } = await import('../skills/skillMarket.js');
+            const market = new SkillMarket();
+            const result = await market.installSkill(skillPath);
+            return result;
+        }
+        catch (error) {
+            console.error('[IPC] skill:install error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    'skill:uninstall': async (mainWindow, previewWindow, { name }) => {
+        try {
+            const { SkillMarket } = await import('../skills/skillMarket.js');
+            const market = new SkillMarket();
+            const result = await market.uninstallSkill(name);
+            return result;
+        }
+        catch (error) {
+            console.error('[IPC] skill:uninstall error:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    'skill:openDirectory': async (mainWindow, previewWindow) => {
+        try {
+            const { shell } = await import('electron');
+            const homeDir = process.env.HOME || process.env.USERPROFILE || '~';
+            const skillsDir = `${homeDir}/.opencowork/skills`;
+            await shell.openPath(skillsDir);
+            return { success: true };
+        }
+        catch (error) {
+            console.error('[IPC] skill:openDirectory error:', error);
             return { success: false, error: error.message };
         }
     },

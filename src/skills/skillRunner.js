@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import crypto from 'crypto';
 const DEFAULT_CONFIG = {
     allowedCommands: ['git', 'ls', 'pwd', 'head', 'tail', 'mkdir', 'rmdir', 'touch', 'rm'],
     shellInjectionEnabled: false,
