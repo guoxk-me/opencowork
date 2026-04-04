@@ -10,7 +10,6 @@ import SchedulerPanel from './components/SchedulerPanel';
 import { SkillPanel } from './components/SkillPanel';
 import { useTaskStore } from './stores/taskStore';
 import { useSessionStore } from './stores/sessionStore';
-import { useSkillStore } from './stores/skillStore';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -75,7 +74,7 @@ function App() {
     clearActiveSteps,
   } = useTaskStore();
   const { saveMessages } = useSessionStore();
-  const { isOpen: isSkillOpen, setOpen: setSkillOpen } = useSkillStore();
+  const [isSkillOpen, setSkillOpen] = useState(false);
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [imageKey, setImageKey] = useState(0);
 
@@ -354,7 +353,7 @@ function App() {
         </main>
 
         {/* Control bar */}
-        <ControlBar />
+        <ControlBar onSkillClick={() => setSkillOpen(true)} />
 
         {/* Takeover modal */}
         {isTakeover && <TakeoverModal />}
