@@ -5,8 +5,16 @@
 
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
 import { InstalledSkill } from '../../skills/skillManifest';
 import { getSkillRunner, SkillRunner } from '../../skills/skillRunner';
+
+export interface ScriptInfo {
+  scriptPath: string;
+  baseDir: string;
+  commandTemplate?: string;
+}
 
 export interface SkillToolConfig {
   skillRunner?: SkillRunner;
@@ -56,6 +64,9 @@ export class SkillToolFactory {
     const skillName = this.normalizeSkillName(skill.manifest.name);
     const description = skill.manifest.description || `执行 ${skill.manifest.name} 技能`;
 
+    // 检测是否有 scripts 目录
+    const scriptInfo = this.detectScriptsDir(skill);
+
     const SkillArgsSchema = z.object({
       input: z.string().describe('用户输入或任务描述'),
     });
@@ -69,13 +80,23 @@ export class SkillToolFactory {
         console.log(`[SkillTool:${skillName}] Executing with input:`, params.input);
 
         try {
+          // 先执行 skillRunner 获取 SKILL.md 内容
           const result = await skillRunner.executeSkill(skill, [params.input]);
 
           if (result.success) {
             console.log(`[SkillTool:${skillName}] Success:`, result.output?.substring(0, 100));
+
+            let output = result.output || 'Skill 执行完成';
+
+            // 如果有 scripts 目录，追加脚本信息
+            if (scriptInfo) {
+              output += this.buildScriptInfoOutput(scriptInfo);
+              console.log(`[SkillTool:${skillName}] Script detected:`, scriptInfo.scriptPath);
+            }
+
             return {
               success: true,
-              output: result.output || 'Skill 执行完成',
+              output,
             };
           } else {
             console.error(`[SkillTool:${skillName}] Failed:`, result.error);
@@ -115,6 +136,83 @@ export class SkillToolFactory {
       .replace(/\s+/g, '_')
       .replace(/[^a-z0-9_]/g, '')
       .substring(0, 50);
+  }
+
+  /**
+   * 检测 skill 是否有 scripts 目录
+   */
+  private detectScriptsDir(skill: InstalledSkill): ScriptInfo | null {
+    const scriptsDir = path.join(skill.manifest.directory, 'scripts');
+
+    if (!fs.existsSync(scriptsDir)) {
+      return null;
+    }
+
+    try {
+      const files = fs.readdirSync(scriptsDir);
+      const pythonScripts = files.filter((f) => f.endsWith('.py'));
+
+      if (pythonScripts.length === 0) {
+        return null;
+      }
+
+      // 优先查找 create_*.py, main.py, 或第一个 .py 文件
+      let mainScript =
+        pythonScripts.find((f) => f.startsWith('create_')) ||
+        pythonScripts.find((f) => f === 'main.py') ||
+        pythonScripts[0];
+
+      const scriptPath = path.join(scriptsDir, mainScript);
+
+      // 提取命令模板
+      const commandTemplate = this.extractCommandTemplate(
+        skill.manifest.content,
+        skill.manifest.directory
+      );
+
+      return {
+        scriptPath,
+        baseDir: skill.manifest.directory,
+        commandTemplate: commandTemplate || undefined,
+      };
+    } catch (error) {
+      console.warn(`[SkillToolFactory] Failed to read scripts dir:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 从 SKILL.md 内容中提取 bash 命令模板
+   */
+  private extractCommandTemplate(content: string, baseDir: string): string | null {
+    const bashBlockRegex = /```bash\n([\s\S]*?)```/g;
+    let match;
+
+    while ((match = bashBlockRegex.exec(content)) !== null) {
+      const codeBlock = match[1];
+      // 查找包含 python3 的命令
+      const pythonCmdMatch = codeBlock.match(/python3\s+([^\n]+)/);
+      if (pythonCmdMatch) {
+        // 替换 {baseDir} 为实际路径
+        let cmd = pythonCmdMatch[1].trim();
+        cmd = cmd.replace(/\{baseDir\}/g, baseDir);
+        return cmd;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 构建脚本信息输出
+   */
+  private buildScriptInfoOutput(scriptInfo: ScriptInfo): string {
+    return `
+---
+【可执行脚本】
+脚本路径: ${scriptInfo.scriptPath}
+${scriptInfo.commandTemplate ? `命令模板: ${scriptInfo.commandTemplate}` : '用法: 请参考上方 bash 示例'}
+提示: 请使用 cli 工具执行上述命令，将用户输入转换为 --content 参数`;
   }
 }
 
