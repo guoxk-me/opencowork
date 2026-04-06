@@ -1,8 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-
-export type IMPlatform = 'feishu' | 'dingtalk' | 'wecom' | 'slack';
-export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'error';
+import {
+  getConnectionStatusManager,
+  IMPlatform,
+  ConnectionStatus,
+} from './connectionStatusManager';
 
 export interface FeishuConfig {
   enabled: boolean;
@@ -180,6 +182,13 @@ export class IMConfigStore {
   }
 
   getStatus(platform: IMPlatform): ConnectionStatus {
+    const statusManager = getConnectionStatusManager();
+    const realStatus = statusManager.getStatus(platform);
+
+    if (realStatus !== 'disconnected') {
+      return realStatus;
+    }
+
     const config = this.configs[platform];
     if (!config || !(config as any).enabled) {
       return 'disconnected';

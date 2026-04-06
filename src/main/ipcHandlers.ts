@@ -257,10 +257,46 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     try {
       if (platform === 'feishu') {
         const feishuConfig = config as { appId: string; appSecret: string };
+
         if (!feishuConfig.appId || !feishuConfig.appSecret) {
           return { success: false, error: '配置不能为空' };
         }
-        return { success: true, message: '飞书连接配置有效' };
+        if (!feishuConfig.appId.startsWith('cli_')) {
+          return { success: false, error: 'App ID 必须以 cli_ 开头' };
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        try {
+          const response = await fetch(
+            'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                app_id: feishuConfig.appId,
+                app_secret: feishuConfig.appSecret,
+              }),
+              signal: controller.signal,
+            }
+          );
+
+          clearTimeout(timeout);
+
+          if (response.ok) {
+            return { success: true, message: '连接成功' };
+          } else {
+            const error = await response.json();
+            return { success: false, error: error.msg || '连接失败' };
+          }
+        } catch (error: any) {
+          clearTimeout(timeout);
+          if (error.name === 'AbortError') {
+            return { success: false, error: '连接超时(5s)' };
+          }
+          return { success: false, error: error.message || '连接失败' };
+        }
       }
       return { success: false, error: `${platform} 平台即将支持` };
     } catch (error: any) {

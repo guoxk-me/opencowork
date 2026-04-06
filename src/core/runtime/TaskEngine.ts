@@ -541,7 +541,11 @@ export class TaskEngine {
   async cancel(handleId: string): Promise<void> {
     const handle = this.tasks.get(handleId);
     if (handle) {
-      this.executor.pause();
+      if (typeof (this.executor as any).cancel === 'function') {
+        (this.executor as any).cancel();
+      } else if (typeof this.executor.pause === 'function') {
+        this.executor.pause();
+      }
       this.clearPopupWait();
       this.clearUserConfirm();
       handle.status = TaskStatus.CANCELLED;

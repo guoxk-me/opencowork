@@ -1,5 +1,6 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 import { IMBot, IMMessage, IMCard, IMNotification, IMBinding } from '../types';
+import { getConnectionStatusManager, IMPlatform } from '../../config/connectionStatusManager';
 
 export interface FeishuConfig {
   appId: string;
@@ -28,6 +29,8 @@ export class FeishuBot implements IMBot {
   }
 
   async initialize(): Promise<void> {
+    const statusManager = getConnectionStatusManager();
+
     this.client = new Lark.Client({
       appId: this.config.appId,
       appSecret: this.config.appSecret,
@@ -45,8 +48,15 @@ export class FeishuBot implements IMBot {
       appSecret: this.config.appSecret,
     });
 
-    this.wsClient.start({ eventDispatcher: this.eventDispatcher });
-    console.log('[FeishuBot] WebSocket client started');
+    try {
+      await this.wsClient.start({ eventDispatcher: this.eventDispatcher });
+      statusManager.setStatus('feishu', 'connected');
+      console.log('[FeishuBot] WebSocket client started');
+    } catch (error) {
+      statusManager.setStatus('feishu', 'error');
+      console.error('[FeishuBot] WebSocket start failed:', error);
+      throw error;
+    }
   }
 
   private async handleMessageEvent(data: any): Promise<void> {
@@ -261,6 +271,21 @@ export class FeishuBot implements IMBot {
 
   verifySignature(timestamp: string, signature: string): boolean {
     return true;
+  }
+
+  async close(): Promise<void> {
+    const statusManager = getConnectionStatusManager();
+    try {
+      if (this.wsClient) {
+        await this.wsClient.stop();
+        this.wsClient = undefined;
+      }
+      statusManager.setStatus('feishu', 'disconnected');
+      console.log('[FeishuBot] Connection closed');
+    } catch (error) {
+      statusManager.setStatus('feishu', 'error');
+      console.error('[FeishuBot] Error closing connection:', error);
+    }
   }
 }
 

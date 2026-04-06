@@ -58,12 +58,13 @@ async function bootstrap() {
   }
 
   // 初始化 Feishu IM 服务
+  let feishuServiceInstance: any = null;
   try {
     const feishuConfig = loadFeishuConfig();
     if (feishuConfig) {
       const { createFeishuService } = await import('../im/feishu/FeishuService.js');
       const userDataPath = path.join(app.getPath('userData'), 'data');
-      createFeishuService({
+      feishuServiceInstance = createFeishuService({
         feishu: feishuConfig,
         userDataPath,
       });
@@ -83,6 +84,13 @@ async function bootstrap() {
   mainWindow.on('closed', () => {
     const previewManager = getPreviewManager();
     previewManager.cleanup();
+
+    if (feishuServiceInstance?.cleanup) {
+      feishuServiceInstance.cleanup().catch((err: any) => {
+        console.error('[Main] FeishuService cleanup error:', err);
+      });
+    }
+
     mainWindow = null;
     if (previewWindow && !previewWindow.isDestroyed()) {
       previewWindow.close();

@@ -3,6 +3,7 @@ import { createDispatchService, DispatchService } from '../DispatchService';
 import { getProgressEmitter, ProgressEmitter } from '../ProgressEmitter';
 import { initializeBindingStore } from '../store/bindingStore';
 import { loadFeishuConfig } from './config';
+import { getConnectionStatusManager } from '../../config/connectionStatusManager';
 
 export interface FeishuServiceConfig {
   feishu: FeishuConfig;
@@ -71,6 +72,27 @@ export class FeishuService {
 
   getProgressEmitter(): ProgressEmitter | null {
     return this.progressEmitter;
+  }
+
+  async cleanup(): Promise<void> {
+    const statusManager = getConnectionStatusManager();
+    console.log('[FeishuService] Cleaning up...');
+
+    if (this.bot) {
+      try {
+        await this.bot.close();
+      } catch (error) {
+        console.error('[FeishuService] Error closing bot:', error);
+      }
+      this.bot = null;
+    }
+
+    this.dispatchService = null;
+    this.progressEmitter = null;
+    this.config = null;
+
+    statusManager.setStatus('feishu', 'disconnected');
+    console.log('[FeishuService] Cleanup complete');
   }
 }
 
