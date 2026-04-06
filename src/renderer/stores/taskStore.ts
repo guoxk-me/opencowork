@@ -23,7 +23,15 @@ export interface AgentStep {
 
 export interface Task {
   id: string;
-  status: 'idle' | 'planning' | 'executing' | 'paused' | 'waiting_confirm' | 'completed' | 'failed';
+  status:
+    | 'idle'
+    | 'planning'
+    | 'executing'
+    | 'paused'
+    | 'waiting_confirm'
+    | 'completed'
+    | 'failed'
+    | 'cancelled';
   description: string;
   progress: {
     current: number;

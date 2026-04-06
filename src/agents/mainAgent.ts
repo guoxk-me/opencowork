@@ -22,6 +22,7 @@ import { getSkillToolFactory, SkillToolFactory } from '../tools/skill/SkillToolF
 import { recordingTools } from '../tools/skill/RecordingTools';
 import { listSkillsTool } from '../tools/skill/ListSkillsTool';
 import { getSkillLoader } from '../skills/skillLoader';
+import { getHistoryService } from '../history/historyService';
 
 function cleanHtmlText(text: string): string {
   return text
@@ -743,6 +744,16 @@ export class MainAgent {
         },
       });
 
+      try {
+        const historyService = getHistoryService();
+        await historyService.completeTask(this.threadId, {
+          success: true,
+          output: result,
+        });
+      } catch (historyError) {
+        console.error('[MainAgent] Failed to save history:', historyError);
+      }
+
       return {
         success: true,
         output: result,
@@ -768,6 +779,16 @@ export class MainAgent {
       }
 
       this.sendTaskError(friendlyError);
+
+      try {
+        const historyService = getHistoryService();
+        await historyService.completeTask(this.threadId, {
+          success: false,
+          error: friendlyError,
+        });
+      } catch (historyError) {
+        console.error('[MainAgent] Failed to save history:', historyError);
+      }
 
       return {
         success: false,
