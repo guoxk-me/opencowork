@@ -7,7 +7,7 @@ import {
   setTaskEnginePreviewWindow,
   setTaskEngineMainWindow,
   getPreviewManager,
-  sharedMainAgent,
+  setSharedMainAgent,
 } from './ipcHandlers';
 import { setAskUserMainWindow } from '../core/executor/AskUserExecutor';
 import { setBrowserExecutorMainWindow } from '../core/executor/BrowserExecutor';
@@ -80,11 +80,12 @@ async function bootstrap() {
   // 预初始化 Shared MainAgent，确保飞书消息能立即处理
   try {
     const { createMainAgent } = await import('../agents/mainAgent.js');
-    sharedMainAgent = await createMainAgent({
+    const agent = await createMainAgent({
       logger: { level: 'debug', output: 'console' },
     });
-    sharedMainAgent.setMainWindow(mainWindow);
-    sharedMainAgent.setPreviewWindow(previewWindow);
+    agent.setMainWindow(mainWindow);
+    agent.setPreviewWindow(previewWindow);
+    setSharedMainAgent(agent);
     console.log('[Main] Shared MainAgent pre-initialized');
   } catch (error) {
     console.error('[Main] Failed to pre-initialize MainAgent:', error);

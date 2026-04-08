@@ -61,6 +61,10 @@ export function getSharedMainAgent(): MainAgent | null {
   return sharedMainAgent;
 }
 
+export function setSharedMainAgent(agent: MainAgent | null): void {
+  sharedMainAgent = agent;
+}
+
 type IpcHandler = (
   mainWindow: BrowserWindow | null,
   previewWindow: BrowserWindow | null,
