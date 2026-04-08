@@ -76,6 +76,19 @@ async function bootstrap() {
     console.error('[Feishu] Failed to initialize:', error);
   }
 
+  // 预初始化 Shared MainAgent，确保飞书消息能立即处理
+  try {
+    const { createMainAgent } = await import('../agents/mainAgent.js');
+    sharedMainAgent = await createMainAgent({
+      logger: { level: 'debug', output: 'console' },
+    });
+    sharedMainAgent.setMainWindow(mainWindow);
+    sharedMainAgent.setPreviewWindow(previewWindow);
+    console.log('[Main] Shared MainAgent pre-initialized');
+  } catch (error) {
+    console.error('[Main] Failed to pre-initialize MainAgent:', error);
+  }
+
   // 开发模式下打开开发者工具
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
