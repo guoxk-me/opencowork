@@ -99,15 +99,7 @@ export const useIMStore = create<IMStore>((set, get) => ({
     try {
       const configs = await window.electron.invoke('im:load');
       const statuses = await window.electron.invoke('im:statusAll');
-
-      console.log('[IMStore] IPC returned statuses:', JSON.stringify(statuses));
-      console.log('[IMStore] statuses type:', typeof statuses);
-      console.log('[IMStore] statuses.feishu:', statuses?.feishu);
-
       set({ configs, statuses });
-
-      const currentState = get();
-      console.log('[IMStore] Store statuses after update:', JSON.stringify(currentState.statuses));
     } catch (error: any) {
       console.error('[IMStore] Load failed:', error);
       set({ message: { type: 'error', text: `加载失败: ${error.message}` } });

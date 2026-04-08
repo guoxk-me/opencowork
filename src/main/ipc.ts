@@ -4,6 +4,8 @@ import { IPC_HANDLERS } from './ipcHandlers';
 
 let registeredChannels: string[] = [];
 
+const NO_WRAP_CHANNELS = ['im:load', 'im:statusAll', 'im:status'];
+
 export function setupIPC(
   mainWindow: BrowserWindow | null,
   previewWindow: BrowserWindow | null
@@ -22,6 +24,11 @@ export function setupIPC(
       console.log(`[IPC] ${channel}:`, payload, 'mainWindow:', mainWindow ? 'exists' : 'null');
       try {
         const result = await ipcHandler(mainWindow, previewWindow, payload);
+
+        if (NO_WRAP_CHANNELS.includes(channel)) {
+          return result;
+        }
+
         return { success: true, data: result };
       } catch (error: any) {
         console.error(`[IPC] ${channel} error:`, error);
