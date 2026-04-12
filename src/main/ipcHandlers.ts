@@ -1,6 +1,7 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, app } from 'electron';
+import * as path from 'path';
+import * as fs from 'fs';
 import { TaskEngine } from '../core/runtime/TaskEngine';
-import { PreviewManager } from '../preview/PreviewManager';
 import { sessionManager } from './SessionManager';
 import { BrowserExecutor } from '../core/executor/BrowserExecutor';
 import { CLIExecutor } from '../core/executor/CLIExecutor';
@@ -10,7 +11,6 @@ import { ScheduleType } from '../scheduler/types';
 import { getIMConfigStore } from '../config/imConfig';
 
 const taskEngine = new TaskEngine();
-const previewManager = new PreviewManager();
 
 let browserExecutor: BrowserExecutor | null = null;
 let cliExecutor: CLIExecutor | null = null;
@@ -41,19 +41,9 @@ export function setTaskEngineMainWindow(window: BrowserWindow | null): void {
   taskEngine.setMainWindow(window);
 }
 
-// Set preview window reference
-export function setTaskEnginePreviewWindow(window: BrowserWindow | null): void {
-  taskEngine.setPreviewWindow(window);
-}
-
 // Export taskEngine for direct access if needed
 export function getTaskEngine(): TaskEngine {
   return taskEngine;
-}
-
-// Export previewManager for direct access if needed
-export function getPreviewManager(): PreviewManager {
-  return previewManager;
 }
 
 // Export sharedMainAgent for direct access if needed (v0.8.1 - Feishu integration)
@@ -364,64 +354,15 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     return { success: true };
   },
 
-  // 浏览器导航控制 (v2.0)
+  // 浏览器导航控制 (v2.0) - 使用 headed 浏览器
   'browser:navigate': async (mainWindow, previewWindow, { url }) => {
-    const pm = getPreviewManager();
-    await pm.navigateTo(url);
-    return { success: true };
-  },
-
-  'browser:goBack': async (mainWindow, previewWindow) => {
-    const pm = getPreviewManager();
-    await pm.goBack();
-    return { success: true };
-  },
-
-  'browser:goForward': async (mainWindow, previewWindow) => {
-    const pm = getPreviewManager();
-    await pm.goForward();
-    return { success: true };
-  },
-
-  'browser:reload': async (mainWindow, previewWindow) => {
-    const pm = getPreviewManager();
-    await pm.reload();
-    return { success: true };
-  },
-
-  'browser:stop': async (mainWindow, previewWindow) => {
-    const pm = getPreviewManager();
-    await pm.stop();
-    return { success: true };
-  },
-
-  'browser:setMode': async (mainWindow, previewWindow, { mode }) => {
-    console.log('[IPC] browser:setMode called with mode:', mode);
-    const pm = getPreviewManager();
-    await pm.setMode(mode as any);
-    return { success: true };
-  },
-
-  // Legacy alias for preview:setMode
-  'preview:setMode': async (mainWindow, previewWindow, { mode }) => {
-    console.log('[IPC] preview:setMode called with mode:', mode);
-    const pm = getPreviewManager();
-    await pm.setMode(mode as any);
-    return { success: true };
-  },
-
-  'browser:getStatus': async (mainWindow, previewWindow) => {
-    const pm = getPreviewManager();
-    return {
-      mode: pm.getMode(),
-      syncStatus: pm.getSyncStatus(),
-      url: pm.getCurrentUrl(),
-    };
-  },
-
-  'browser:setSyncStatus': async (mainWindow, previewWindow, { status }) => {
-    const pm = getPreviewManager();
-    pm.setSyncStatus(status as any);
+    const executor = getBrowserExecutor();
+    const page = executor.getPage();
+    if (page) {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } else {
+      await executor.launchHeadedBrowser({ url });
+    }
     return { success: true };
   },
 
@@ -429,18 +370,15 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   'browser:getCurrentUrl': async (mainWindow, previewWindow) => {
     const executor = getBrowserExecutor();
     const url = executor.getCurrentPageUrl();
-    const title = executor.getCurrentPageTitle();
+    const title = await executor.getCurrentPageTitle();
     return { success: true, url, title };
   },
 
-  // v2.0: Sync webview with Agent browser - called after action completes
-  'browser:syncWebview': async (mainWindow, previewWindow, { url, title }) => {
-    // Send URL to renderer to update webview
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('browser:webviewNavigate', { url, title });
-      console.log('[IPC] browser:syncWebview sent:', url, title);
-    }
-    return { success: true };
+  // v2.0: Get CDP endpoint for webview connection
+  'browser:getCDPEndpoint': async (mainWindow, previewWindow) => {
+    const executor = getBrowserExecutor();
+    const cdpEndpoint = await executor.getCDPEndpoint();
+    return { success: true, cdpEndpoint };
   },
 
   // v2.0: Headed browser launch
@@ -455,26 +393,72 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     }
   },
 
-  // v2.0: CDP connection
-  'browser:connectCDP': async (mainWindow, previewWindow, { endpoint }) => {
+  // v2.0: Get cookies from Webview partition
+  'browser:getWebviewCookies': async (mainWindow, previewWindow, { partition }) => {
     try {
-      const executor = getBrowserExecutor();
-      await executor.connectToCDP(endpoint);
-      return { success: true };
+      const { session } = require('electron');
+      const targetPartition = partition || 'persist:automation';
+      const webviewSession = session.fromPartition(targetPartition);
+      const cookies = await webviewSession.cookies.get({});
+      console.log('[IPC] Got cookies from partition', targetPartition, ':', cookies.length);
+      return { success: true, cookies };
     } catch (error: any) {
-      console.error('[IPC] browser:connectCDP error:', error);
+      console.error('[IPC] browser:getWebviewCookies error:', error);
       return { success: false, error: error.message };
     }
   },
 
-  // v2.0: Disconnect CDP
-  'browser:disconnectCDP': async (mainWindow, previewWindow) => {
+  // v2.0: Export session data (cookies, localStorage, sessionStorage) from Webview
+  'browser:exportSession': async (
+    mainWindow,
+    previewWindow,
+    { cookies, localStorage, sessionStorage, url }
+  ) => {
+    try {
+      const userDataPath = app.getPath('userData');
+      const sessionPath = path.join(userDataPath, 'browser', 'sessionData.json');
+      const dir = path.dirname(sessionPath);
+
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      // Save session data (cookies, localStorage, sessionStorage passed from Renderer)
+      const sessionData = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        cookies: cookies || [],
+        localStorage: localStorage || {},
+        sessionStorage: sessionStorage || {},
+        sourceUrl: url || '',
+      };
+
+      fs.writeFileSync(sessionPath, JSON.stringify(sessionData, null, 2), 'utf-8');
+      console.log('[IPC] Session exported to:', sessionPath);
+      console.log(
+        '[IPC] Session data - cookies:',
+        cookies?.length || 0,
+        'localStorage:',
+        Object.keys(localStorage || {}).length,
+        'sessionStorage:',
+        Object.keys(sessionStorage || {}).length
+      );
+
+      return { success: true, sessionPath, cookiesCount: cookies?.length || 0 };
+    } catch (error: any) {
+      console.error('[IPC] browser:exportSession error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // v2.0: Check if session data exists
+  'browser:hasSession': async (mainWindow, previewWindow) => {
     try {
       const executor = getBrowserExecutor();
-      await executor.disconnectFromCDP();
-      return { success: true };
+      const hasSession = executor.hasSessionData();
+      return { success: true, hasSession };
     } catch (error: any) {
-      console.error('[IPC] browser:disconnectCDP error:', error);
+      console.error('[IPC] browser:hasSession error:', error);
       return { success: false, error: error.message };
     }
   },

@@ -1,21 +1,14 @@
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import * as path from 'path';
 import { setupIPC } from './ipc';
-import { createMainWindow, createPreviewWindow } from './window';
+import { createMainWindow } from './window';
 import { setupShortcuts } from './shortcuts';
-import {
-  setTaskEnginePreviewWindow,
-  setTaskEngineMainWindow,
-  getPreviewManager,
-  setSharedMainAgent,
-  setMainWindowRef,
-} from './ipcHandlers';
+import { setTaskEngineMainWindow, setSharedMainAgent } from './ipcHandlers';
 import { setAskUserMainWindow } from '../core/executor/AskUserExecutor';
 import { setBrowserExecutorMainWindow } from '../core/executor/BrowserExecutor';
 import { loadFeishuConfig } from '../im/feishu/config';
 
 let mainWindow: BrowserWindow | null = null;
-let previewWindow: BrowserWindow | null = null;
 
 async function bootstrap() {
   // 创建主窗口
@@ -30,23 +23,8 @@ async function bootstrap() {
   // 设置主窗口引用到 BrowserExecutor（用于实时截图）
   setBrowserExecutorMainWindow(mainWindow);
 
-  // v2.0: Set main window reference for webview sync
-  setMainWindowRef(mainWindow);
-
-  // 初始化 PreviewManager - 不设置默认模式，让用户手动切换
-  const previewManager = getPreviewManager();
-  await previewManager.initialize(mainWindow);
-  // 移除默认 sidebar 模式，让 Renderer 侧边栏正常显示截图
-  // await previewManager.setMode('sidebar');
-
-  // 不再默认创建独立预览窗口，只在 detached 模式时创建
-  // previewWindow = createPreviewWindow();
-
-  // 设置预览窗口引用到 TaskEngine
-  setTaskEnginePreviewWindow(previewWindow);
-
   // 设置IPC处理器
-  setupIPC(mainWindow, previewWindow);
+  setupIPC(mainWindow, null);
 
   // 设置全局快捷键
   setupShortcuts(mainWindow);
@@ -88,7 +66,6 @@ async function bootstrap() {
       logger: { level: 'debug', output: 'console' },
     });
     agent.setMainWindow(mainWindow);
-    agent.setPreviewWindow(previewWindow);
     setSharedMainAgent(agent);
     console.log('[Main] Shared MainAgent pre-initialized');
   } catch (error) {
@@ -101,9 +78,6 @@ async function bootstrap() {
   }
 
   mainWindow.on('closed', () => {
-    const previewManager = getPreviewManager();
-    previewManager.cleanup();
-
     if (feishuServiceInstance?.cleanup) {
       feishuServiceInstance.cleanup().catch((err: any) => {
         console.error('[Main] FeishuService cleanup error:', err);
@@ -111,13 +85,6 @@ async function bootstrap() {
     }
 
     mainWindow = null;
-    if (previewWindow && !previewWindow.isDestroyed()) {
-      previewWindow.close();
-    }
-  });
-
-  previewWindow?.on('closed', () => {
-    previewWindow = null;
   });
 
   console.log('[OpenCowork] Application started successfully');

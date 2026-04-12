@@ -6,6 +6,7 @@ export interface ElectronAPI {
   invoke: (channel: string, data?: any) => Promise<any>;
   on: (channel: string, callback: (...args: any[]) => void) => () => void;
   onScreenshot: (callback: (data: { screenshot: string }) => void) => () => void;
+  getWebviewCookies: (partition: string) => Promise<any>;
 }
 
 const electronAPI: ElectronAPI = {
@@ -57,6 +58,10 @@ const electronAPI: ElectronAPI = {
     return () => {
       ipcRenderer.removeListener('preview:screenshot', listener);
     };
+  },
+  getWebviewCookies: (partition: string) => {
+    console.log('[Preload] getWebviewCookies called for partition:', partition);
+    return ipcRenderer.invoke('browser:getWebviewCookies', { partition });
   },
 };
 

@@ -10,7 +10,9 @@ import {
 } from '../action/ActionSchema';
 import { getLLMClient } from '../../llm/OpenAIResponses';
 import { LLMMessage } from '../../llm/LLMClient';
-import { ScreencastService } from './ScreencastService';
+import * as fs from 'fs';
+import * as path from 'path';
+import { app } from 'electron';
 
 let mainWindowRef: Electron.BrowserWindow | null = null;
 
@@ -35,21 +37,13 @@ export class BrowserExecutor {
   private context: any = null;
   private page: any = null;
   private llmClient = getLLMClient();
-  private screencast: ScreencastService;
 
   // CDP connection mode (v2.0)
   private cdpEndpoint: string | null = null;
   private isCDPConnected: boolean = false;
-  private isHeadedMode: boolean = false;
+  private isHeadedMode: boolean = true;
 
-  constructor() {
-    this.screencast = new ScreencastService({
-      fps: 8,
-      quality: 50,
-      maxWidth: 800,
-      maxHeight: 450,
-    });
-  }
+  constructor() {}
 
   async launchBrowser(): Promise<void> {
     await this.ensureBrowser();
@@ -164,6 +158,45 @@ export class BrowserExecutor {
     }
   }
 
+  // v2.0: Connect to CDP WebView Bridge
+  async connectToCDPWebViewBridge(webSocketUrl: string, timeoutMs: number = 10000): Promise<void> {
+    try {
+      const { chromium } = require('playwright-extra');
+
+      console.log('[BrowserExecutor] Connecting to CDP WebView Bridge at:', webSocketUrl);
+
+      const connectPromise = chromium.connectOverCDP(webSocketUrl);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('CDP connection timeout')), timeoutMs)
+      );
+
+      this.browser = await Promise.race([connectPromise, timeoutPromise]);
+
+      // Get the default context
+      const contexts = this.browser.contexts();
+      if (contexts.length > 0) {
+        this.context = contexts[0];
+
+        // Get existing page or create new one
+        const pages = this.context.pages();
+        if (pages.length > 0) {
+          this.page = pages[0];
+        } else {
+          this.page = await this.context.newPage();
+        }
+      }
+
+      this.cdpEndpoint = webSocketUrl;
+      this.isCDPConnected = true;
+      this.isHeadedMode = false;
+
+      console.log('[BrowserExecutor] Connected to CDP WebView Bridge successfully');
+    } catch (error) {
+      console.error('[BrowserExecutor] CDP WebView Bridge connection failed:', error);
+      throw error;
+    }
+  }
+
   // v2.0: Disconnect from CDP
   async disconnectFromCDP(): Promise<void> {
     if (this.browser) {
@@ -173,9 +206,29 @@ export class BrowserExecutor {
       this.page = null;
       this.cdpEndpoint = null;
       this.isCDPConnected = false;
-      this.isHeadedMode = false;
       console.log('[BrowserExecutor] Disconnected from CDP');
     }
+  }
+
+  // v2.0: Get CDP WebSocket URL for webview connection
+  async getCDPEndpoint(): Promise<string | null> {
+    if (!this.browser || !this.isCDPConnected) {
+      return null;
+    }
+    try {
+      const version = await this.browser.version();
+      // CDP WebSocket URL format: ws://127.0.0.1:9222/devtools/browser/xxx
+      const wsUrl = `ws://127.0.0.1:9222`;
+      return wsUrl;
+    } catch (error) {
+      console.error('[BrowserExecutor] Failed to get CDP endpoint:', error);
+      return null;
+    }
+  }
+
+  // v2.0: Check if browser is in headed mode
+  isHeaded(): boolean {
+    return this.isHeadedMode;
   }
 
   // v2.0: Check if CDP connected
@@ -186,6 +239,106 @@ export class BrowserExecutor {
   // v2.0: Check if headed mode
   isInHeadedMode(): boolean {
     return this.isHeadedMode;
+  }
+
+  // v2.0: Get session data file path
+  private getSessionDataPath(): string {
+    const userDataPath = app?.getPath?.('userData') || process.cwd();
+    return path.join(userDataPath, 'browser', 'sessionData.json');
+  }
+
+  // v2.0: Export session data (cookies, localStorage, etc.) to file
+  async exportSessionData(): Promise<string | null> {
+    if (!this.context) {
+      console.warn('[BrowserExecutor] No context to export');
+      return null;
+    }
+
+    try {
+      const sessionPath = this.getSessionDataPath();
+
+      // Ensure directory exists
+      const dir = path.dirname(sessionPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      // Get cookies
+      const cookies = await this.context.cookies();
+
+      // Get storage state (includes localStorage/sessionStorage origins)
+      const storageState = await this.context.storageState();
+
+      // Combine into session data
+      const sessionData = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        cookies,
+        storageState,
+      };
+
+      fs.writeFileSync(sessionPath, JSON.stringify(sessionData, null, 2), 'utf-8');
+      console.log('[BrowserExecutor] Session data exported to:', sessionPath);
+      console.log('[BrowserExecutor] Exported cookies count:', cookies.length);
+
+      return sessionPath;
+    } catch (error) {
+      console.error('[BrowserExecutor] Failed to export session data:', error);
+      return null;
+    }
+  }
+
+  // v2.0: Import session data from file (cookies, localStorage, sessionStorage)
+  async importSessionData(): Promise<{
+    cookies: any[];
+    localStorage: any;
+    sessionStorage: any;
+  } | null> {
+    const sessionPath = this.getSessionDataPath();
+
+    if (!fs.existsSync(sessionPath)) {
+      console.log('[BrowserExecutor] No session data file found at:', sessionPath);
+      return null;
+    }
+
+    try {
+      const data = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
+
+      // Validate version
+      if (!data.version || data.version !== 1) {
+        console.warn('[BrowserExecutor] Invalid session data version');
+        return null;
+      }
+
+      const cookiesCount = data.cookies?.length || 0;
+      const localStorageCount = Object.keys(data.localStorage || {}).length;
+      const sessionStorageCount = Object.keys(data.sessionStorage || {}).length;
+
+      console.log('[BrowserExecutor] Session data loaded from:', sessionPath);
+      console.log(
+        '[BrowserExecutor] Loaded - cookies:',
+        cookiesCount,
+        'localStorage:',
+        localStorageCount,
+        'sessionStorage:',
+        sessionStorageCount
+      );
+
+      return {
+        cookies: data.cookies || [],
+        localStorage: data.localStorage || {},
+        sessionStorage: data.sessionStorage || {},
+      };
+    } catch (error) {
+      console.error('[BrowserExecutor] Failed to import session data:', error);
+      return null;
+    }
+  }
+
+  // v2.0: Check if session data exists
+  hasSessionData(): boolean {
+    const sessionPath = this.getSessionDataPath();
+    return fs.existsSync(sessionPath);
   }
 
   // v2.0: Get browser for external use (PreviewManager)
@@ -201,10 +354,10 @@ export class BrowserExecutor {
     return 'about:blank';
   }
 
-  // v2.0: Get current page title
-  getCurrentPageTitle(): string {
+  // v2.0: Get current page title (async)
+  async getCurrentPageTitle(): Promise<string> {
     if (this.page) {
-      return this.page.title() || '';
+      return (await this.page.title()) || '';
     }
     return '';
   }
@@ -213,7 +366,13 @@ export class BrowserExecutor {
     const startTime = Date.now();
 
     try {
-      await this.ensureBrowser();
+      if (!this.browser || !this.page) {
+        if (this.isHeadedMode) {
+          await this.launchHeadedBrowser();
+        } else {
+          await this.ensureBrowser();
+        }
+      }
 
       switch (action.type) {
         case 'browser:navigate':
@@ -266,18 +425,82 @@ export class BrowserExecutor {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-blink-features=AutomationControlled',
+          '--remote-debugging-port=9222',
         ],
       });
 
       try {
-        this.context = await this.browser.newContext({
+        // 尝试加载已保存的 session data (新格式: cookies, localStorage, sessionStorage)
+        const sessionData = await this.importSessionData();
+
+        const contextOptions: any = {
           viewport: { width: 1280, height: 720 },
           userAgent:
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        });
+        };
+
+        // 创建 context (不在这里设置 storageState，因为我们用 cookies + initScript)
+        this.context = await this.browser.newContext(contextOptions);
+
+        // 应用 cookies
+        if (sessionData?.cookies && sessionData.cookies.length > 0) {
+          for (const cookie of sessionData.cookies) {
+            try {
+              await this.context.addCookies([cookie]);
+            } catch (e) {
+              // Some cookies may fail (httpOnly, secure, expired, etc.)
+            }
+          }
+          console.log('[BrowserExecutor] Cookies applied from session data');
+        }
 
         try {
           this.page = await this.context.newPage();
+
+          // 注入 localStorage 和 sessionStorage (在页面加载之前)
+          if (sessionData?.localStorage || sessionData?.sessionStorage) {
+            const storageInitScript = `
+              (function() {
+                try {
+                  const ls = ${JSON.stringify(sessionData.localStorage || {})};
+                  const ss = ${JSON.stringify(sessionData.sessionStorage || {})};
+                  
+                  // Inject localStorage
+                  if (ls && typeof localStorage !== 'undefined') {
+                    for (const [key, value] of Object.entries(ls)) {
+                      try {
+                        localStorage.setItem(key, String(value));
+                      } catch (e) {
+                        // quota exceeded or other error
+                      }
+                    }
+                  }
+                  
+                  // Inject sessionStorage
+                  if (ss && typeof sessionStorage !== 'undefined') {
+                    for (const [key, value] of Object.entries(ss)) {
+                      try {
+                        sessionStorage.setItem(key, String(value));
+                      } catch (e) {
+                        // quota exceeded or other error
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.warn('Storage injection error:', e);
+                }
+              })();
+            `;
+            await this.page.addInitScript(() => {
+              eval(storageInitScript);
+            });
+            console.log(
+              '[BrowserExecutor] Storage injected - localStorage:',
+              Object.keys(sessionData.localStorage || {}).length,
+              'sessionStorage:',
+              Object.keys(sessionData.sessionStorage || {}).length
+            );
+          }
 
           // 手动反检测脚本
           await this.page.addInitScript(() => {
@@ -304,11 +527,6 @@ export class BrowserExecutor {
             });
           });
 
-          // 设置实时截图服务
-          this.screencast.setPage(this.page);
-          this.screencast.setMainWindow(mainWindowRef);
-          this.screencast.start();
-
           console.log('[BrowserExecutor] Browser launched with manual stealth');
         } catch (e) {
           await this.browser.close();
@@ -327,12 +545,21 @@ export class BrowserExecutor {
     }
   }
 
+  // v2.0: Screencast removed - using webview sync instead
   startScreencast(): void {
-    this.screencast.start();
+    // No-op
   }
 
   stopScreencast(): void {
-    this.screencast.stop();
+    // No-op
+  }
+
+  setActiveMode(active: boolean): void {
+    // v2.0: Screencast removed
+  }
+
+  setTaskRunning(running: boolean): void {
+    // v2.0: Screencast removed
   }
 
   private async navigate(action: BrowserNavigateAction, startTime: number): Promise<ActionResult> {
@@ -822,9 +1049,6 @@ ${htmlSnippet}
 
   async cleanup(): Promise<void> {
     try {
-      if (this.screencast) {
-        this.screencast.stop();
-      }
       if (this.page) {
         await this.page.close();
         this.page = null;
@@ -1049,18 +1273,6 @@ ${htmlSnippet}
     } catch (error) {
       console.error('[BrowserExecutor] Failed to get page structure:', error);
       return null;
-    }
-  }
-
-  setActiveMode(active: boolean): void {
-    if (this.screencast) {
-      this.screencast.setActiveMode(active);
-    }
-  }
-
-  setTaskRunning(running: boolean): void {
-    if (this.screencast) {
-      this.screencast.setTaskRunning(running);
     }
   }
 

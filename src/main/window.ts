@@ -2,8 +2,12 @@ import { BrowserWindow, screen, app } from 'electron';
 import * as path from 'path';
 import { PREVIEW_CONFIG } from '../config/constants';
 
-// CDP debugging port
+// CDP debugging port for main process
 const CDP_PORT = 9222;
+
+// Enable remote debugging for main process
+app.commandLine.appendSwitch('remote-debugging-port', String(CDP_PORT));
+app.commandLine.appendSwitch('inspect', String(CDP_PORT + 1000));
 
 export function createMainWindow(): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;

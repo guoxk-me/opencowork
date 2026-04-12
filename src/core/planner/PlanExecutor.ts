@@ -38,11 +38,11 @@ export class PlanExecutor {
   }
 
   startScreencast(): void {
-    this.router.browserExecutor.startScreencast();
+    // v2.0: Screencast removed - using webview sync instead
   }
 
   stopScreencast(): void {
-    this.router.browserExecutor.stopScreencast();
+    // v2.0: Screencast removed - using webview sync instead
   }
 
   async getPageContent(): Promise<string> {

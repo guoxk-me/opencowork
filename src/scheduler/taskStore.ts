@@ -29,6 +29,10 @@ export class TaskStore {
 
       if (fs.existsSync(this.dbPath)) {
         const data = await fs.promises.readFile(this.dbPath, 'utf-8');
+        if (!data || data.trim() === '') {
+          console.log('[TaskStore] Empty file, starting fresh');
+          return;
+        }
         const tasks: ScheduledTask[] = JSON.parse(data);
         for (const task of tasks) {
           this.tasks.set(task.id, task);

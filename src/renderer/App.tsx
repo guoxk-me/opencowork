@@ -10,6 +10,7 @@ import SchedulerPanel from './components/SchedulerPanel';
 import { SkillPanel } from './components/SkillPanel';
 import { PlanViewer } from './components/PlanViewer';
 import { IMConfigPanel } from './components/IMConfigPanel';
+import { ExecutionStepsPanel } from './components/ExecutionStepsPanel';
 import { useTaskStore } from './stores/taskStore';
 import { useSessionStore } from './stores/sessionStore';
 
@@ -250,61 +251,6 @@ function App() {
       })
     );
 
-    // Setup webview event handlers after component mounts
-    setTimeout(() => {
-      const webview = document.getElementById('sidebar-webview') as any;
-      if (webview) {
-        webview.addEventListener('did-finish-load', () => {
-          console.log('[Renderer] Sidebar webview loaded:', webview.getURL());
-        });
-        webview.addEventListener('did-navigate', (event: any) => {
-          const urlInput = document.getElementById('url-input') as HTMLInputElement | null;
-          if (urlInput) {
-            urlInput.value = event.url;
-          }
-        });
-        console.log('[Renderer] Sidebar webview event handlers registered');
-      }
-    }, 1000);
-
-    // v2.0: Listen for webview navigation from Agent browser
-    unsubscribers.push(
-      window.electron.on('browser:webviewNavigate', (data: any) => {
-        try {
-          const url = data?.url;
-          const title = data?.title;
-          console.log('[Renderer] Received webviewNavigate:', url, title);
-          const webview = document.getElementById('sidebar-webview') as any;
-          if (webview && url) {
-            webview.src = url;
-            const urlInput = document.getElementById('url-input') as HTMLInputElement | null;
-            if (urlInput) {
-              urlInput.value = url;
-            }
-          }
-        } catch (error) {
-          console.error('[Renderer] webviewNavigate handler error:', error);
-        }
-      })
-    );
-
-    // v2.0: Listen for user interactions in webview and sync back to Agent
-    unsubscribers.push(
-      window.electron.on('browser:userInteraction', (data: any) => {
-        try {
-          console.log('[Renderer] User interacting with webview');
-          // Update sync status to show user is working
-          const syncStatus = document.getElementById('sync-status');
-          if (syncStatus) {
-            syncStatus.textContent = '● 等待同步';
-            syncStatus.className = 'status-user';
-          }
-        } catch (error) {
-          console.error('[Renderer] userInteraction handler error:', error);
-        }
-      })
-    );
-
     console.log('[Renderer] Registered event listeners, count:', unsubscribers.length);
 
     return () => {
@@ -340,81 +286,8 @@ function App() {
             </div>
           </div>
 
-          {/* Sidebar Preview - only show in sidebar mode */}
-          {previewMode === 'sidebar' && (
-            <div className="w-[40%] border-l border-border bg-surface flex flex-col">
-              {/* Preview header with toolbar */}
-              <div className="h-10 flex items-center justify-between px-2 border-b border-border bg-elevated">
-                <div className="flex items-center gap-1">
-                  <button
-                    id="btn-back"
-                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-border text-text-secondary hover:text-white"
-                    title="后退"
-                  >
-                    ←
-                  </button>
-                  <button
-                    id="btn-forward"
-                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-border text-text-secondary hover:text-white"
-                    title="前进"
-                  >
-                    →
-                  </button>
-                  <button
-                    id="btn-reload"
-                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-border text-text-secondary hover:text-white"
-                    title="刷新"
-                  >
-                    ↻
-                  </button>
-                  <button
-                    id="btn-stop"
-                    className="w-8 h-8 flex items-center justify-center rounded hover:bg-border text-text-secondary hover:text-white"
-                    title="停止"
-                  >
-                    ×
-                  </button>
-                </div>
-                <input
-                  id="url-input"
-                  type="text"
-                  placeholder="输入网址后回车跳转"
-                  className="flex-1 h-7 mx-2 bg-background border border-border rounded px-2 text-sm text-white focus:border-primary outline-none"
-                />
-                <button
-                  onClick={() => setPreviewMode('detached')}
-                  className="p-1.5 rounded hover:bg-border text-text-muted hover:text-white"
-                  title="打开独立窗口"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                    />
-                  </svg>
-                </button>
-              </div>
-              {/* Preview content - webview */}
-              <div className="flex-1 bg-white overflow-hidden">
-                <webview
-                  id="sidebar-webview"
-                  src="about:blank"
-                  partition="persist:automation"
-                  className="w-full h-full"
-                />
-              </div>
-              {/* Preview footer with current action */}
-              {task?.currentStep && (
-                <div className="h-8 px-4 border-t border-border bg-elevated flex items-center">
-                  <span className="text-xs text-text-muted font-mono truncate">
-                    {task.currentStep}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Sidebar - Execution Steps Panel */}
+          {previewMode === 'sidebar' && <ExecutionStepsPanel />}
         </main>
 
         {/* Control bar */}

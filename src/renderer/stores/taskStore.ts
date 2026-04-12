@@ -202,12 +202,5 @@ export const useTaskStore = create<TaskState>((set) => ({
   previewMode: 'sidebar' as const,
   setPreviewMode: (mode: 'sidebar' | 'detached') => {
     set({ previewMode: mode });
-    try {
-      if (window.electron) {
-        window.electron.invoke('preview:setMode', { mode });
-      }
-    } catch (error) {
-      console.error('[taskStore] setPreviewMode error:', error);
-    }
   },
 }));
