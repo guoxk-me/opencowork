@@ -1,7 +1,5 @@
 <h1 align="center">
-  <br>
-  <img src="docs/images/logo.png" alt="OpenCowork" width="200">
-  <br>
+
   OpenCowork
   <br>
 </h1>
