@@ -237,41 +237,6 @@ const browserTool = tool(
         );
       }
 
-      // v2.0: Sync webview with Agent browser via CDP
-      try {
-        const currentUrl = executor.getCurrentPageUrl();
-        const currentTitle = await executor.getCurrentPageTitle();
-        const { getMainWindowRef } = await import('../main/ipcHandlers.js');
-        const mainWindow = getMainWindowRef();
-
-        // 获取 CDP endpoint 并发送 CDP attach 消息
-        const cdpEndpoint = await executor.getCDPEndpoint();
-        console.log(
-          '[BrowserTool] Sync webview - URL:',
-          currentUrl,
-          'title:',
-          currentTitle,
-          'mainWindow:',
-          !!mainWindow,
-          'cdpEndpoint:',
-          cdpEndpoint
-        );
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          // 发送 CDP attach 消息给渲染进程，让 webview 附加到 Playwright 浏览器
-          mainWindow.webContents.send('browser:attachCDP', {
-            url: currentUrl,
-            title: currentTitle,
-            cdpEndpoint: cdpEndpoint,
-          });
-          console.log('[BrowserTool] Sent browser:attachCDP');
-        } else {
-          console.warn('[BrowserTool] Cannot sync webview: mainWindow missing or destroyed');
-        }
-      } catch (syncError) {
-        console.warn('[BrowserTool] Failed to sync webview:', syncError);
-      }
-
       return result;
     } catch (error: any) {
       const duration = Date.now() - startTime;
