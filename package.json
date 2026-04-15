@@ -1,6 +1,6 @@
 {
   "name": "opencowork",
-  "version": "0.10.5",
+  "version": "0.10.7",
   "description": "AI Native Desktop Agent - 让 AI 像人类一样操作电脑",
   "homepage": "https://opencowork.me",
   "repository": {
@@ -10,40 +10,6 @@
   "bugs": {
     "url": "https://github.com/LeonGaoHaining/opencowork/issues"
   },
-  "author": "OpenCowork Team <gaohaining@virtualmetah.com>",
-  "license": "Apache-2.0",
-  "main": "dist/main/main/index.js",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "clean:src": "find src -name '*.js' -type f ! -name '*.test.js' -delete",
-    "build:main": "npm run clean:src && tsc -p tsconfig.main.json",
-    "build:preload": "npm run clean:src && tsc -p tsconfig.preload.json",
-    "build:renderer": "npm run clean:src && vite build",
-    "electron:dev": "npm run build:main && npm run build:preload && npm run build:renderer && electron .",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "prepare": "npm run build:main && npm run build:preload",
-    "postversion": "node -e \"const pkg=require('./package.json'); const fs=require('fs'); let doc=fs.readFileSync('docs/USER_GUIDE.md','utf-8'); doc=doc.replace(/_OpenCowork v[\\\\d.]+_/g, '_OpenCowork v'+pkg.version+'_'); doc=doc.replace(/\\\\| 版本     \\| v[\\\\d.]+       \\|/g, '| 版本     | v'+pkg.version+'       |'); doc=doc.replace(/更新日期 \\| \\\\d{4}-\\\\d{2}-\\\\d{2}/g, '更新日期 | '+new Date().toISOString().split('T')[0].replace(/-/g,'-')); fs.writeFileSync('docs/USER_GUIDE.md',doc);\""
-  },
-  "keywords": [
-    "ai",
-    "agent",
-    "desktop",
-    "electron",
-    "browser-automation",
-    "playwright",
-    "llm",
-    "gpt",
-    "automation",
-    "productivity"
-  ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
     "@langchain/core": "latest",
     "@langchain/langgraph": "latest",
