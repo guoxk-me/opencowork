@@ -22,6 +22,13 @@ This work stream is converging OpenCowork toward the v0.12 task-model and templa
 
 - v0.12 is still in progress; the core task/result/template loop is now in place, but final product polish and broader scenario coverage remain.
 
+## v0.12.1 - 2026-04-20
+
+### Fixes
+
+- Added the missing `OverviewPanel` and `overviewStore` files required by the renderer overview flow.
+- Bumped the application version after the `v0.12.0` tag to keep the published tag history consistent.
+
 ## v0.10.10 - 2026-04-18
 
 ### Release focus

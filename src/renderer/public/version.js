@@ -1,1 +1,1 @@
-window.__APP_VERSION__ = "0.12.0";
+window.__APP_VERSION__ = "0.12.1";
