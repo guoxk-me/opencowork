@@ -1,3 +1,5 @@
+import { TaskArtifact, TaskResultError, TaskSource } from '../core/task/types';
+
 export interface TaskStep {
   id: string;
   toolName: string;
@@ -11,8 +13,14 @@ export interface TaskStep {
 
 export interface TaskResult {
   success: boolean;
-  output?: any;
+  output?: unknown;
   error?: string;
+  summary?: string;
+  artifacts?: TaskArtifact[];
+  rawOutput?: unknown;
+  structuredData?: unknown;
+  taskError?: TaskResultError;
+  reusable?: boolean;
 }
 
 export interface TaskHistoryRecord {
@@ -29,6 +37,11 @@ export interface TaskHistoryRecord {
   metadata?: {
     model?: string;
     threadId?: string;
+    source?: TaskSource | string;
+    runId?: string;
+    resultSummary?: string;
+    templateId?: string;
+    artifactsCount?: number;
     [key: string]: unknown;
   };
 }

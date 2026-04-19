@@ -63,7 +63,26 @@ The preview area shows the browser and agent activity in real time so you can ob
 
 ### History
 
-Task history stores prior executions, steps, and outcomes so you can review what happened and recover context when needed.
+Task history stores prior executions, results, steps, and outcomes so you can review what happened and recover context when needed.
+
+History is now more result-centric:
+
+- summary and artifacts are shown before raw step traces,
+- run links let you jump back to the full execution record,
+- template links let you reuse successful tasks faster.
+
+### Task Results and Templates
+
+When a task completes successfully, OpenCowork saves a structured result object.
+
+You can then:
+
+- open the result panel to review the summary and artifacts,
+- save the run as a reusable template,
+- run that template again with parameters,
+- or add it to the scheduler for repeat execution.
+
+This is the main workflow for the current v0.12 task-model direction.
 
 ### Skills
 

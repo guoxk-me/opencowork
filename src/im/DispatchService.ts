@@ -3,6 +3,10 @@ import { IMMessage, IMBot, DispatchTask, TaskStatus } from './types';
 import { CommandParser } from './CommandParser';
 import { getProgressEmitter } from './ProgressEmitter';
 import { getSharedMainAgent } from '../main/ipcHandlers';
+import { mapAgentResultToTaskResult } from '../core/task/resultMapper';
+import { getTaskTemplateRepository } from '../core/task/TaskTemplateRepository';
+import { resolveTemplateInput } from '../core/task/templateUtils';
+import { getTaskOrchestrator } from '../core/task/TaskOrchestrator';
 
 const PRIORITY_MAP: Record<string, number> = {
   low: 10,
@@ -52,6 +56,9 @@ export class DispatchService extends EventEmitter {
       case 'task':
         await this.handleTask(msg, cmd.args.join(' '));
         break;
+      case 'template':
+        await this.handleTemplate(msg, cmd.args);
+        break;
       case 'status':
         await this.handleStatus(msg, cmd.args[0]);
         break;
@@ -100,6 +107,7 @@ export class DispatchService extends EventEmitter {
     this.statusMap.set(task.id, {
       id: task.id,
       status: 'pending',
+      message: '任务已接收，等待执行',
       updatedAt: Date.now(),
     });
 
@@ -113,6 +121,96 @@ export class DispatchService extends EventEmitter {
     );
 
     await this.forwardToDesktop(task);
+  }
+
+  private async handleTemplate(msg: IMMessage, args: string[]): Promise<void> {
+    const chatType = (msg as any).chatType || 'p2p';
+    const action = args[0];
+
+    if (!action || action === '列表') {
+      const templates = await getTaskTemplateRepository().list();
+      if (templates.length === 0) {
+        await this.bot.sendMessage(msg.conversationId, '暂无模板，请先在桌面端保存模板', chatType);
+        return;
+      }
+
+      const content = templates
+        .slice(0, 20)
+        .map((template) => `• ${template.name} (${template.id.slice(0, 12)})`)
+        .join('\n');
+      await this.bot.sendMessage(msg.conversationId, `📚 可用模板\n\n${content}`, chatType);
+      return;
+    }
+
+    if (action !== '运行') {
+      await this.bot.sendMessage(
+        msg.conversationId,
+        '模板命令格式:\n1. 模板 列表\n2. 模板 运行 [模板名/ID] [key=value ...]',
+        chatType
+      );
+      return;
+    }
+
+    const templateKey = args[1];
+    if (!templateKey) {
+      await this.bot.sendMessage(msg.conversationId, '请提供模板名或模板ID', chatType);
+      return;
+    }
+
+    const templates = await getTaskTemplateRepository().list();
+    const template =
+      templates.find((item) => item.id === templateKey) ||
+      templates.find((item) => item.name === templateKey) ||
+      templates.find((item) => item.name.includes(templateKey));
+
+    if (!template) {
+      await this.bot.sendMessage(msg.conversationId, `未找到模板: ${templateKey}`, chatType);
+      return;
+    }
+
+    const templateInput: Record<string, unknown> = {};
+    for (const arg of args.slice(2)) {
+      const [key, ...rest] = arg.split('=');
+      if (!key || rest.length === 0) {
+        continue;
+      }
+      templateInput[key] = rest.join('=');
+    }
+
+    try {
+      const resolved = resolveTemplateInput(template, templateInput);
+      const task: DispatchTask = {
+        id: this.generateTaskId(),
+        description: resolved.prompt,
+        templateId: template.id,
+        templateInput,
+        source: 'feishu',
+        priority: 'normal',
+        userId: msg.userId,
+        conversationId: msg.conversationId,
+        createdAt: Date.now(),
+      };
+
+      this.enqueueTask(task);
+      this.statusMap.set(task.id, {
+        id: task.id,
+        status: 'pending',
+        message: `模板任务已接收: ${template.name}`,
+        resultSummary: resolved.prompt,
+        updatedAt: Date.now(),
+      });
+
+      await this.bot.sendMessage(
+        msg.conversationId,
+        `✅ 模板任务已接收\n\n任务ID: ${task.id}\n模板: ${template.name}\n执行内容: ${resolved.prompt}`,
+        chatType
+      );
+
+      await this.forwardToDesktop(task);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.bot.sendMessage(msg.conversationId, `模板参数缺失或无效: ${message}`, chatType);
+    }
   }
 
   private enqueueTask(task: DispatchTask): void {
@@ -135,7 +233,11 @@ export class DispatchService extends EventEmitter {
       const agent = getSharedMainAgent();
       if (!agent) {
         console.warn('[DispatchService] Shared MainAgent not initialized');
-        this.updateTaskStatus(task.id, { status: 'failed', message: 'Agent not initialized' });
+        this.updateTaskStatus(task.id, {
+          status: 'failed',
+          message: 'Agent not initialized',
+          resultSummary: 'Agent 未初始化',
+        });
         await this.bot.pushNotification(task.userId, {
           title: '❌ 任务执行失败',
           content: 'Agent 未初始化',
@@ -144,24 +246,65 @@ export class DispatchService extends EventEmitter {
       }
 
       console.log('[DispatchService] Forwarding task to sharedMainAgent:', task.description);
-      const result = await agent.run(task.description);
+      const taskOrchestrator = getTaskOrchestrator();
+      taskOrchestrator.startRun({
+        runId: task.id,
+        source: 'im',
+        title: task.templateId ? `IM Template: ${task.templateId}` : task.description,
+        prompt: task.description,
+        params: task.templateInput,
+        templateId: task.templateId,
+        metadata: {
+          userId: task.userId,
+          conversationId: task.conversationId,
+        },
+      });
+      this.updateTaskStatus(task.id, {
+        status: 'executing',
+        message: task.templateId ? `AI 正在执行模板任务: ${task.templateId}` : 'AI 正在执行任务',
+        runId: task.id,
+      });
+      const taskResult = await taskOrchestrator.executeRun(task.id, async () => {
+        const result = await agent.run(task.description);
+        return mapAgentResultToTaskResult(result);
+      });
 
-      if (result.success) {
-        this.updateTaskStatus(task.id, { status: 'executing' });
+      if (!taskResult.error) {
+        this.updateTaskStatus(task.id, {
+          status: 'completed',
+          message: task.templateId ? '模板任务执行完成' : '任务执行完成',
+          result: taskResult,
+          resultSummary: taskResult.summary,
+          artifactsCount: taskResult.artifacts.length,
+          runId: task.id,
+        });
         await this.bot.pushNotification(task.userId, {
           title: '✅ 任务执行完成',
-          content: result.finalMessage || result.output || '任务已完成',
+          content: taskResult.summary || '任务已完成',
         });
       } else {
-        this.updateTaskStatus(task.id, { status: 'failed', message: result.error });
+        this.updateTaskStatus(task.id, {
+          status: 'failed',
+          message: taskResult.error.message,
+          result: taskResult,
+          resultSummary: taskResult.summary,
+          artifactsCount: taskResult.artifacts.length,
+          runId: task.id,
+        });
         await this.bot.pushNotification(task.userId, {
           title: '❌ 任务执行失败',
-          content: result.error || '未知错误',
+          content: taskResult.error.message || '未知错误',
         });
       }
     } catch (error) {
       console.error('[DispatchService] Forward to desktop failed:', error);
-      this.updateTaskStatus(task.id, { status: 'failed', message: String(error) });
+      this.updateTaskStatus(task.id, {
+        status: 'failed',
+        message: String(error),
+        resultSummary: String(error),
+        artifactsCount: 0,
+        runId: task.id,
+      });
       await this.bot.pushNotification(task.userId, {
         title: '❌ 任务执行失败',
         content: String(error),
@@ -197,6 +340,9 @@ export class DispatchService extends EventEmitter {
     if (status.message) {
       response += `\n信息: ${status.message}`;
     }
+    if (status.resultSummary) {
+      response += `\n结果: ${status.resultSummary}`;
+    }
 
     await this.bot.sendMessage(msg.conversationId, response, chatType);
   }
@@ -215,7 +361,8 @@ export class DispatchService extends EventEmitter {
     const list = tasks
       .map((t) => {
         const icon = { pending: '⏳', executing: '🔄', completed: '✅', failed: '❌' }[t.status];
-        return `${icon} ${t.id.slice(0, 12)}`;
+        const summary = t.resultSummary ? ` - ${t.resultSummary}` : '';
+        return `${icon} ${t.id.slice(0, 12)}${summary}`;
       })
       .join('\n');
 
@@ -313,7 +460,11 @@ export class DispatchService extends EventEmitter {
         const result = await window.electron.invoke('feishu:cancel', { taskId });
 
         if (result.success) {
-          this.updateTaskStatus(taskId, { status: 'failed', message: '用户取消' });
+          this.updateTaskStatus(taskId, {
+            status: 'failed',
+            message: '用户取消',
+            resultSummary: '用户取消任务',
+          });
           await this.bot.sendMessage(
             msg.conversationId,
             `🗑️ 已取消任务\n\n任务ID: ${taskId}`,
@@ -342,12 +493,6 @@ export class DispatchService extends EventEmitter {
   }
 
   updateTaskStatus(taskId: string, status: Partial<TaskStatus>): void {
-    if (status.status === 'completed' || status.status === 'failed') {
-      this.statusMap.delete(taskId);
-      this.statusInsertionOrder = this.statusInsertionOrder.filter((k) => k !== taskId);
-      return;
-    }
-
     if (this.statusMap.size >= MAX_STATUS_MAP_SIZE) {
       const oldestKey = this.statusInsertionOrder.shift();
       if (oldestKey) {
@@ -360,8 +505,9 @@ export class DispatchService extends EventEmitter {
     }
     const existing = this.statusMap.get(taskId);
     if (existing) {
-      this.statusMap.set(taskId, { ...existing, ...status, updatedAt: Date.now() });
-      this.emit('task:status', taskId, status);
+      const nextStatus = { ...existing, ...status, updatedAt: Date.now() };
+      this.statusMap.set(taskId, nextStatus);
+      this.emit('task:status', taskId, nextStatus);
     }
   }
 

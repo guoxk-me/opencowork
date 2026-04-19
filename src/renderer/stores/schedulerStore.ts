@@ -11,6 +11,7 @@ interface SchedulerState {
   error: string | null;
   selectedTaskId: string | null;
   isOpen: boolean;
+  draftTaskInput: Partial<CreateScheduledTaskInput> | null;
 
   loadTasks: () => Promise<void>;
   createTask: (input: CreateScheduledTaskInput) => Promise<void>;
@@ -21,6 +22,14 @@ interface SchedulerState {
   disableTask: (id: string) => Promise<void>;
   selectTask: (id: string | null) => void;
   setOpen: (open: boolean) => void;
+  prepareDraftFromTemplate: (payload: {
+    name: string;
+    description: string;
+    templateId: string;
+    input?: Record<string, unknown>;
+  }) => void;
+  prepareDraftFromPrompt: (payload: { name: string; description: string; prompt: string }) => void;
+  clearDraft: () => void;
 }
 
 export const useSchedulerStore = create<SchedulerState>((set, get) => ({
@@ -29,6 +38,7 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
   error: null,
   selectedTaskId: null,
   isOpen: false,
+  draftTaskInput: null,
 
   loadTasks: async () => {
     set({ isLoading: true, error: null });
@@ -112,6 +122,54 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
         .catch((err) => console.error('[schedulerStore] loadTasks failed:', err));
     }
   },
+
+  prepareDraftFromTemplate: ({ name, description, templateId, input }) => {
+    set({
+      draftTaskInput: {
+        name,
+        description,
+        enabled: true,
+        schedule: {
+          type: ScheduleType.CRON,
+          cron: '0 9 * * *',
+        },
+        execution: {
+          taskDescription: '',
+          templateId,
+          input,
+          timeout: 300000,
+          maxRetries: 3,
+          retryDelayMs: 1000,
+        },
+      },
+      isOpen: true,
+    });
+  },
+
+  prepareDraftFromPrompt: ({ name, description, prompt }) => {
+    set({
+      draftTaskInput: {
+        name,
+        description,
+        enabled: true,
+        schedule: {
+          type: ScheduleType.CRON,
+          cron: '0 9 * * *',
+        },
+        execution: {
+          taskDescription: prompt,
+          templateId: undefined,
+          input: undefined,
+          timeout: 300000,
+          maxRetries: 3,
+          retryDelayMs: 1000,
+        },
+      },
+      isOpen: true,
+    });
+  },
+
+  clearDraft: () => set({ draftTaskInput: null }),
 }));
 
 export const defaultTaskInput: CreateScheduledTaskInput = {
@@ -124,6 +182,8 @@ export const defaultTaskInput: CreateScheduledTaskInput = {
   },
   execution: {
     taskDescription: '',
+    templateId: undefined,
+    input: undefined,
     timeout: 300000,
     maxRetries: 3,
     retryDelayMs: 1000,

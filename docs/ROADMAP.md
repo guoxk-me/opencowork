@@ -2,7 +2,7 @@
 
 ## Product Direction
 
-OpenCowork is evolving from an internal high-velocity agent shell into a sharper open-source desktop automation platform with strong MCP interoperability.
+OpenCowork is evolving from an internal high-velocity agent shell into a Browser-first AI work system that emphasizes task completion, result delivery, and repeatable automation, while keeping strong MCP interoperability and open-source extensibility.
 
 ## Current Stage
 
@@ -17,10 +17,35 @@ OpenCowork is evolving from an internal high-velocity agent shell into a sharper
 - MCP server mode,
 - English and Chinese UI.
 
+### Current transition
+
+The current codebase is entering an architectural convergence phase:
+
+- unify task models across chat, scheduler, IM, and history,
+- introduce a result-oriented task pipeline,
+- reduce direct entry-point to agent coupling,
+- prepare template-ready task abstractions for future automation reuse.
+
+### Recently completed
+
+- unified `TaskRun` / `TaskResult` / `TaskArtifact` / `TaskTemplate` runtime model,
+- result persistence and result delivery in the main workflow,
+- result-oriented history records with outcome filters and rerun links,
+- editable template panel with parameterized template runs and validation,
+- template creation from successful runs and history records,
+- scheduler template execution with stored result metadata,
+- IM template commands, recent-task result summaries, and run links,
+- first-stage task orchestration convergence across chat, scheduler, IM, and replay.
+
 ## Near-Term Roadmap
 
 ### v0.10.x stabilization
 
+- Introduce a unified task foundation (`TaskRun`, `TaskResult`, `TaskArtifact`).
+- Introduce a unified task orchestration entry for the main chat flow.
+- Start shifting history from step-oriented records to result-oriented records.
+- Align scheduler and IM with shared run/result semantics.
+- Extend orchestration semantics to pause/resume/cancel/status handling.
 - Reduce redundant screenshot usage in text-centric tasks.
 - Improve extraction quality for noisy pages.
 - Improve handling of desktop opener commands such as `xdg-open`.
@@ -28,32 +53,50 @@ OpenCowork is evolving from an internal high-velocity agent shell into a sharper
 
 ### v0.11.x workflow depth
 
-- Stronger memory workflows and summaries.
-- Better skill discovery and skill authoring UX.
-- More robust task restore and continuation flows.
+- Stronger Browser-first task completion and recovery.
+- Result delivery as a first-class product surface.
+- Result-centric history and clearer rerun flows.
+- Better task restore and continuation flows.
 - Cleaner exposure control for MCP server tools.
 
 ### v0.12.x ecosystem readiness
 
+- Task templates and parameterized reruns.
+- Shared task model across chat, scheduler, IM, replay, and MCP.
+- Result-centric history and template-centric reuse flows.
+- More productized skills and clearer skill contracts.
 - Better docs and example configurations.
-- Improved tests for browser and agent flows.
+- Improved tests for browser, task, history, and template flows.
 - More polished release packaging.
 - Stronger open-source contributor ergonomics.
 
 ## Strategic Themes
 
-### 1. MCP-native agent workflows
+### 1. Browser-first task delivery
+
+The product should become best-in-class at finishing browser-heavy work and returning usable outputs rather than only showing an execution trace.
+
+### 2. Unified task system
+
+Chat, scheduler, IM, replay, and future MCP-triggered work should converge on a shared task model and lifecycle.
+
+### 3. MCP-native extensibility
 
 OpenCowork should be able to both consume and expose MCP tools cleanly.
 
-### 2. Practical desktop automation
+### 4. Practical desktop automation
 
 The product should solve real work: browsing, searching, collecting, summarizing, generating assets, and orchestrating repeatable local tasks.
 
-### 3. Skills as reusable product surface
+### 5. Skills as reusable product surface
 
 Skills should become a compelling layer for community extension and lightweight automation packaging.
 
-### 4. Open-source credibility
+### 6. Open-source credibility
 
 The project should feel reliable, well-documented, and easy to evaluate for builders, tinkerers, and product teams.
+
+## Key Specs
+
+- `docs/SPEC_v0.10.x_task-foundation.md` — task foundation and architectural convergence
+- `docs/PRD.md` — product direction and v0.11 / v0.12 planning

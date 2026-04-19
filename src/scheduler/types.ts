@@ -14,7 +14,9 @@ export interface ScheduleConfig {
 }
 
 export interface ExecutionConfig {
-  taskDescription: string;
+  taskDescription?: string;
+  templateId?: string;
+  input?: Record<string, unknown>;
   timeout: number;
   maxRetries: number;
   retryDelayMs: number;
@@ -31,6 +33,9 @@ export interface ScheduledTask {
   nextRun?: number;
   lastStatus?: 'success' | 'failed' | 'cancelled';
   lastError?: string;
+  lastRunId?: string;
+  lastResultSummary?: string;
+  lastArtifactsCount?: number;
   runCount: number;
   createdAt: number;
   updatedAt: number;
@@ -54,6 +59,9 @@ export interface TaskExecutionResult {
   duration: number;
   error?: string;
   retryCount: number;
+  runId?: string;
+  resultSummary?: string;
+  artifactsCount?: number;
 }
 
 export enum ExecutorMode {
@@ -68,7 +76,17 @@ export interface ExecutorConfig {
 
 export type CreateScheduledTaskInput = Omit<
   ScheduledTask,
-  'id' | 'createdAt' | 'updatedAt' | 'runCount' | 'lastRun' | 'nextRun' | 'lastStatus' | 'lastError'
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'runCount'
+  | 'lastRun'
+  | 'nextRun'
+  | 'lastStatus'
+  | 'lastError'
+  | 'lastRunId'
+  | 'lastResultSummary'
+  | 'lastArtifactsCount'
 >;
 
 export type UpdateScheduledTaskInput = Partial<Omit<ScheduledTask, 'id' | 'createdAt'>>;

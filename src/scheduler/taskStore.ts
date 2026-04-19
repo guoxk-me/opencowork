@@ -120,7 +120,12 @@ export class TaskStore {
   async updateExecutionStatus(
     id: string,
     status: 'success' | 'failed' | 'cancelled',
-    error?: string
+    error?: string,
+    metadata?: {
+      lastRunId?: string;
+      lastResultSummary?: string;
+      lastArtifactsCount?: number;
+    }
   ): Promise<ScheduledTask | null> {
     const task = this.tasks.get(id);
     if (!task) return null;
@@ -129,6 +134,9 @@ export class TaskStore {
       lastRun: Date.now(),
       lastStatus: status,
       lastError: error,
+      lastRunId: metadata?.lastRunId,
+      lastResultSummary: metadata?.lastResultSummary,
+      lastArtifactsCount: metadata?.lastArtifactsCount,
       runCount: task.runCount + 1,
     };
     return await this.update(id, updates);

@@ -10,10 +10,13 @@ import { HistoryPanel } from './components/HistoryPanel';
 import SchedulerPanel from './components/SchedulerPanel';
 import { SkillPanel } from './components/SkillPanel';
 import MCPPanel from './components/MCPPanel';
+import TemplatePanel from './components/TemplatePanel';
+import TaskRunsPanel from './components/TaskRunsPanel';
 import { PlanViewer } from './components/PlanViewer';
 import { IMConfigPanel } from './components/IMConfigPanel';
 import { ExecutionStepsPanel } from './components/ExecutionStepsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import OverviewPanel from './components/OverviewPanel';
 import { useTaskStore } from './stores/taskStore';
 import { useSessionStore } from './stores/sessionStore';
 import { useTranslation } from './i18n/useTranslation';
@@ -67,6 +70,7 @@ function App() {
     isTakeover,
     task,
     addMessage,
+    setCurrentResult,
     updateTaskStatus,
     updateTaskProgress,
     updateCurrentStep,
@@ -79,19 +83,25 @@ function App() {
     addActiveStep,
     updateActiveStep,
     clearActiveSteps,
+    isRunsPanelOpen,
+    openRunsPanel,
+    closeRunsPanel,
   } = useTaskStore();
   const { saveMessages } = useSessionStore();
   const [isSkillOpen, setSkillOpen] = useState(false);
   const [isMCPOpen, setMCPOpen] = useState(false);
+  const [isTemplateOpen, setTemplateOpen] = useState(false);
   const [skillPrompt, setSkillPrompt] = useState<{
     taskId: string;
     taskDescription: string;
     actionCount: number;
   } | null>(null);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
+  const [isOverviewOpen, setOverviewOpen] = useState(false);
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [imageKey, setImageKey] = useState(0);
   const interruptingRef = useRef(false);
+  const handledFailureRunIdsRef = useRef(new Set<string>());
   const { t } = useTranslation();
 
   const interruptCurrentTask = async (reason: 'shortcut_escape' | 'user_activity') => {
@@ -122,6 +132,28 @@ function App() {
         interruptingRef.current = false;
       }, 500);
     }
+  };
+
+  const handleTaskFailure = (event: any): void => {
+    const runId = event?.runId || event?.handleId || event?.data?.runId;
+    if (runId && handledFailureRunIdsRef.current.has(runId)) {
+      return;
+    }
+    if (runId) {
+      handledFailureRunIdsRef.current.add(runId);
+    }
+
+    const errorMsg = event?.error?.message || event?.error || '未知错误';
+    setTaskError(errorMsg);
+    updateTaskStatus('failed');
+    setCurrentResult(null);
+    clearActiveSteps();
+    addMessage({
+      role: 'ai',
+      content: `任务执行失败: ${errorMsg}`,
+    });
+    addLog({ type: 'error', message: `错误: ${errorMsg}` });
+    saveMessages(useTaskStore.getState().messages);
   };
 
   useEffect(() => {
@@ -188,17 +220,22 @@ function App() {
       window.electron.on('task:completed', (event: any) => {
         try {
           console.log('[Renderer] Received task:completed', event);
-          console.log('[Renderer] event.result:', JSON.stringify(event.result).substring(0, 500));
+          const completedRunId = event?.runId || event?.handleId || event?.data?.runId;
+          if (completedRunId) {
+            handledFailureRunIdsRef.current.delete(completedRunId);
+          }
           updateTaskStatus('completed');
 
           const { activeSteps } = useTaskStore.getState();
-          const innerResult = event.result?.result || event.result || event.data || {};
-          const resultText = innerResult.finalMessage || '任务已完成';
-          console.log('[Renderer] finalMessage:', resultText);
-          const steps = Array.isArray(innerResult.steps) ? innerResult.steps : [];
+          const taskResult = event.result || event.data?.result || null;
+          const resultText = taskResult?.summary || '任务已完成';
+          const steps = Array.isArray(event.legacyResult?.steps) ? event.legacyResult.steps : [];
 
           const finalSteps =
             activeSteps.length > 0 ? activeSteps : steps.length > 0 ? steps : undefined;
+          if (taskResult) {
+            setCurrentResult(taskResult);
+          }
           addMessage({
             role: 'ai',
             content: resultText,
@@ -217,18 +254,20 @@ function App() {
       window.electron.on('task:error', (event: any) => {
         try {
           console.log('[Renderer] Received task:error', event);
-          const errorMsg = event.error?.message || event.error || '未知错误';
-          setTaskError(errorMsg);
-          updateTaskStatus('failed');
-          clearActiveSteps();
-          addMessage({
-            role: 'ai',
-            content: `任务执行失败: ${errorMsg}`,
-          });
-          addLog({ type: 'error', message: `错误: ${errorMsg}` });
-          saveMessages(useTaskStore.getState().messages);
+          handleTaskFailure(event);
         } catch (error) {
           console.error('[Renderer] task:error handler error:', error);
+        }
+      })
+    );
+
+    unsubscribers.push(
+      window.electron.on('task:failed', (event: any) => {
+        try {
+          console.log('[Renderer] Received task:failed', event);
+          handleTaskFailure(event);
+        } catch (error) {
+          console.error('[Renderer] task:failed handler error:', error);
         }
       })
     );
@@ -358,7 +397,10 @@ function App() {
         <ControlBar
           onSkillClick={() => setSkillOpen(true)}
           onMCPClick={() => setMCPOpen(true)}
+          onTemplateClick={() => setTemplateOpen(true)}
+          onRunsClick={() => openRunsPanel()}
           onSettingsClick={() => setSettingsOpen(true)}
+          onOverviewClick={() => setOverviewOpen(true)}
         />
 
         {/* Takeover modal */}
@@ -394,8 +436,17 @@ function App() {
         {/* MCP Panel */}
         <MCPPanel isOpen={isMCPOpen} onClose={() => setMCPOpen(false)} />
 
+        {/* Template Panel */}
+        <TemplatePanel isOpen={isTemplateOpen} onClose={() => setTemplateOpen(false)} />
+
+        {/* Task Runs Panel */}
+        <TaskRunsPanel isOpen={isRunsPanelOpen} onClose={() => closeRunsPanel()} />
+
         {/* Settings Panel */}
         <SettingsPanel isOpen={isSettingsOpen} onClose={() => setSettingsOpen(false)} />
+
+        {/* Overview Panel */}
+        <OverviewPanel isOpen={isOverviewOpen} onClose={() => setOverviewOpen(false)} />
       </div>
     </ErrorBoundary>
   );

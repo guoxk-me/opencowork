@@ -2,6 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { useIMStore, IMPlatform, ConnectionStatus, IMPlatformConfig } from '../stores/imStore';
 import { FeishuConfig, DingTalkConfig, WeComConfig, SlackConfig } from '../stores/imStore';
 import { useTranslation } from '../i18n/useTranslation';
+import { useTaskStore } from '../stores/taskStore';
+import RelationBadge from './RelationBadge';
+
+interface RecentIMTask {
+  id: string;
+  status: 'pending' | 'executing' | 'completed' | 'failed';
+  message?: string;
+  resultSummary?: string;
+  runId?: string;
+  artifactsCount?: number;
+  updatedAt: number;
+}
 
 interface TabConfig {
   key: IMPlatform;
@@ -133,6 +145,7 @@ export function IMConfigPanel() {
     setMessage,
   } = useIMStore();
   const { t } = useTranslation();
+  const { openRunsPanel } = useTaskStore();
 
   const [localConfigs, setLocalConfigs] = useState<Record<IMPlatform, IMPlatformConfig | null>>({
     feishu: { enabled: false, appId: '', appSecret: '' },
@@ -142,6 +155,7 @@ export function IMConfigPanel() {
   });
 
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [recentTasks, setRecentTasks] = useState<RecentIMTask[]>([]);
 
   useEffect(() => {
     if (isPanelOpen) {
@@ -154,6 +168,38 @@ export function IMConfigPanel() {
       setLocalConfigs((prev) => ({ ...prev, [activeTab]: configs[activeTab] }));
     }
   }, [configs, activeTab]);
+
+  useEffect(() => {
+    if (!isPanelOpen || activeTab !== 'feishu') {
+      return;
+    }
+
+    let cancelled = false;
+    const loadRecentTasks = async () => {
+      try {
+        const result = await window.electron.invoke('im:recentTasks', { limit: 10 });
+        const payload = result?.data || result;
+        if (!cancelled) {
+          setRecentTasks(Array.isArray(payload) ? payload : []);
+        }
+      } catch (error) {
+        console.error('[IMConfigPanel] Failed to load recent IM tasks:', error);
+        if (!cancelled) {
+          setRecentTasks([]);
+        }
+      }
+    };
+
+    void loadRecentTasks();
+    const interval = setInterval(() => {
+      void loadRecentTasks();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isPanelOpen, activeTab]);
 
   if (!isPanelOpen) {
     return null;
@@ -258,6 +304,58 @@ export function IMConfigPanel() {
                 isTesting={isLoading}
                 isSaving={isSaving}
               />
+            )}
+
+            {activeTab === 'feishu' && (
+              <div className="rounded-lg border border-border bg-background p-3">
+                <div className="mb-3 text-sm font-medium text-white">最近 IM 任务</div>
+                {recentTasks.length === 0 ? (
+                  <div className="text-sm text-text-muted">暂无最近任务</div>
+                ) : (
+                  <div className="space-y-2">
+                    {recentTasks.map((task) => (
+                      <div key={task.id} className="rounded border border-border bg-surface p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs text-text-secondary break-all">{task.id}</div>
+                          <RelationBadge label="status" value={task.status} />
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {task.runId && <RelationBadge label="run" value={task.runId} tone="primary" />}
+                        </div>
+                        {task.message && (
+                          <div className="mt-2 text-xs text-text-muted whitespace-pre-wrap">
+                            {task.message}
+                          </div>
+                        )}
+                        {task.resultSummary && (
+                          <div className="mt-2 text-xs text-white whitespace-pre-wrap">
+                            {task.resultSummary}
+                          </div>
+                        )}
+                        {typeof task.artifactsCount === 'number' && (
+                          <div className="mt-1 text-[11px] text-text-muted">
+                            artifacts: {task.artifactsCount}
+                          </div>
+                        )}
+                        <div className="mt-2 flex items-center gap-2">
+                          {task.runId && (
+                            <button
+                              type="button"
+                              onClick={() => openRunsPanel(task.runId as string)}
+                              className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+                            >
+                              View Run
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-2 text-[11px] text-text-muted">
+                          {new Date(task.updatedAt).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
 
             {activeTab !== 'feishu' && (

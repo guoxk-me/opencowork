@@ -16,6 +16,16 @@ OpenCowork is built for people who want an agent that does more than chat. It ca
 
 It is designed for fast iteration on real desktop workflows: research, operations, internal tools, demos, browser automation, and repeatable task execution.
 
+## Current Product Direction
+
+The current work stream is converging around a result-centric task model:
+
+- task runs are recorded as reusable `TaskRun` records,
+- completed work persists into `TaskResult`,
+- history is shifting toward outcomes, artifacts, and rerun links,
+- templates can be created from successful runs and executed with parameters,
+- scheduler and IM surfaces now reuse the same task/result semantics.
+
 ## Highlights in v0.10.10
 
 - Standard MCP client support for remote `streamable-http` endpoints such as LangChain Docs MCP.

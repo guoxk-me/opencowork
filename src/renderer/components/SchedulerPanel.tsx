@@ -5,6 +5,10 @@ import { useSchedulerStore, defaultTaskInput } from '../stores/schedulerStore';
 import { ScheduledTask, ScheduleType } from '../../scheduler/types';
 import { CronParser } from '../../scheduler/cronParser';
 import { useTranslation } from '../i18n/useTranslation';
+import { TaskTemplate } from '../../core/task/types';
+import { getTemplateInputFields } from '../../core/task/templateUtils';
+import { useTaskStore } from '../stores/taskStore';
+import RelationBadge from './RelationBadge';
 
 type TaskTab = 'all' | 'executing' | 'scheduled' | 'completed';
 
@@ -16,6 +20,8 @@ interface CreateTaskFormData {
   intervalMs: number;
   startTime: string;
   taskDescription: string;
+  templateId: string;
+  templateInputs: Record<string, string>;
   timeout: number;
 }
 
@@ -36,10 +42,13 @@ function SchedulerPanel() {
     disableTask,
     selectTask,
     setOpen,
+    draftTaskInput,
+    clearDraft,
   } = useSchedulerStore();
 
   const [activeTab, setActiveTab] = useState<TaskTab>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [formData, setFormData] = useState<CreateTaskFormData>({
     name: '',
     description: '',
@@ -48,18 +57,58 @@ function SchedulerPanel() {
     intervalMs: 3600000,
     startTime: '',
     taskDescription: '',
+    templateId: '',
+    templateInputs: {},
     timeout: 300000,
   });
+
+  const selectedTemplate = templates.find((template) => template.id === formData.templateId) || null;
+  const selectedTemplateFields = selectedTemplate ? getTemplateInputFields(selectedTemplate) : [];
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) || null;
+  const { openRunsPanel } = useTaskStore();
 
   useEffect(() => {
     if (isOpen) {
       loadTasks();
+      void (async () => {
+        try {
+          const result = await window.electron.invoke('template:list');
+          const payload = result?.data || result;
+          setTemplates(Array.isArray(payload) ? payload : []);
+        } catch (error) {
+          console.error('[SchedulerPanel] Failed to load templates:', error);
+          setTemplates([]);
+        }
+      })();
       const interval = setInterval(() => {
         loadTasks();
       }, 5000);
       return () => clearInterval(interval);
     }
   }, [isOpen, loadTasks]);
+
+  useEffect(() => {
+    if (!isOpen || !draftTaskInput) {
+      return;
+    }
+
+    setShowCreateModal(true);
+    setFormData({
+      name: draftTaskInput.name || '',
+      description: draftTaskInput.description || '',
+      scheduleType: (draftTaskInput.schedule?.type as ScheduleType) || ScheduleType.CRON,
+      cron: draftTaskInput.schedule?.cron || '0 9 * * *',
+      intervalMs: draftTaskInput.schedule?.intervalMs || 3600000,
+      startTime: draftTaskInput.schedule?.startTime
+        ? new Date(draftTaskInput.schedule.startTime).toISOString().slice(0, 16)
+        : '',
+      taskDescription: draftTaskInput.execution?.taskDescription || '',
+      templateId: draftTaskInput.execution?.templateId || '',
+      templateInputs: (draftTaskInput.execution?.input as Record<string, string>) || {},
+      timeout: draftTaskInput.execution?.timeout || 300000,
+    });
+    clearDraft();
+  }, [isOpen, draftTaskInput, clearDraft]);
 
   if (!isOpen) return null;
 
@@ -92,7 +141,9 @@ function SchedulerPanel() {
             : undefined,
       },
       execution: {
-        taskDescription: formData.taskDescription,
+        taskDescription: formData.templateId ? '' : formData.taskDescription,
+        templateId: formData.templateId || undefined,
+        input: formData.templateId ? formData.templateInputs : undefined,
         timeout: formData.timeout,
         maxRetries: 3,
         retryDelayMs: 1000,
@@ -101,6 +152,7 @@ function SchedulerPanel() {
 
     await createTask(input);
     setShowCreateModal(false);
+    clearDraft();
     setFormData({
       name: '',
       description: '',
@@ -109,6 +161,8 @@ function SchedulerPanel() {
       intervalMs: 3600000,
       startTime: '',
       taskDescription: '',
+      templateId: '',
+      templateInputs: {},
       timeout: 300000,
     });
   };
@@ -210,104 +264,203 @@ function SchedulerPanel() {
               {t('schedulerPanel.noTasks')}
             </div>
           ) : (
-            <div className="space-y-2">
-              {filteredTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className={`bg-elevated border rounded-lg p-4 hover:border-primary/50 transition-colors ${
-                    selectedTaskId === task.id ? 'border-primary/30' : 'border-border'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1" onClick={() => selectTask(task.id)}>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-medium text-white">{task.name}</h3>
-                        {!task.enabled && (
-                          <span className="text-xs text-text-muted">
-                            {t('schedulerPanel.disabled')}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-text-muted mt-1">{task.description}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
-                        <span>
-                          {t('schedulerPanel.schedule')}: {formatSchedule(task)}
-                        </span>
-                        <span>
-                          {t('schedulerPanel.nextRun')}: {formatNextRun(task.nextRun)}
-                        </span>
-                        <span>
-                          {t('schedulerPanel.runCount')}: {task.runCount}
-                        </span>
-                      </div>
-                      {task.lastStatus && (
-                        <div className="mt-2 text-xs">
-                          <span
-                            className={`${
-                              task.lastStatus === 'success'
-                                ? 'text-green-400'
-                                : task.lastStatus === 'failed'
-                                  ? 'text-red-400'
-                                  : 'text-yellow-400'
-                            }`}
-                          >
-                            {t('schedulerPanel.lastRun')}:{' '}
-                            {task.lastStatus === 'success'
-                              ? t('schedulerPanel.lastSuccess')
-                              : task.lastStatus === 'failed'
-                                ? t('schedulerPanel.lastFailed')
-                                : t('schedulerPanel.lastCancelled')}
-                          </span>
-                          {task.lastError && (
-                            <span className="text-red-400 ml-2">- {task.lastError}</span>
+            <div className="flex gap-4 h-full">
+              <div className="flex-1 space-y-2 overflow-y-auto">
+                {filteredTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className={`bg-elevated border rounded-lg p-4 hover:border-primary/50 transition-colors ${
+                      selectedTaskId === task.id ? 'border-primary/30' : 'border-border'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1" onClick={() => selectTask(task.id)}>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-medium text-white">{task.name}</h3>
+                          {!task.enabled && (
+                            <span className="text-xs text-text-muted">
+                              {t('schedulerPanel.disabled')}
+                            </span>
                           )}
                         </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {task.enabled ? (
+                        <p className="text-xs text-text-muted mt-1">{task.description}</p>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
+                          <span>
+                            {t('schedulerPanel.schedule')}: {formatSchedule(task)}
+                          </span>
+                          <span>
+                            {t('schedulerPanel.nextRun')}: {formatNextRun(task.nextRun)}
+                          </span>
+                          <span>
+                            {t('schedulerPanel.runCount')}: {task.runCount}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <RelationBadge label="task" value={task.id} tone="muted" />
+                          {task.execution.templateId && (
+                            <RelationBadge label="template" value={task.execution.templateId} tone="primary" />
+                          )}
+                          {task.lastStatus && <RelationBadge label="last" value={task.lastStatus} />}
+                        </div>
+                        {task.lastStatus && (
+                          <div className="mt-2 text-xs">
+                            <span
+                              className={`${
+                                task.lastStatus === 'success'
+                                  ? 'text-green-400'
+                                  : task.lastStatus === 'failed'
+                                    ? 'text-red-400'
+                                    : 'text-yellow-400'
+                              }`}
+                            >
+                              {t('schedulerPanel.lastRun')}:{' '}
+                              {task.lastStatus === 'success'
+                                ? t('schedulerPanel.lastSuccess')
+                                : task.lastStatus === 'failed'
+                                  ? t('schedulerPanel.lastFailed')
+                                  : t('schedulerPanel.lastCancelled')}
+                            </span>
+                            {task.lastError && (
+                              <span className="text-red-400 ml-2">- {task.lastError}</span>
+                            )}
+                            {task.lastResultSummary && (
+                              <div className="mt-1 line-clamp-2 text-text-secondary">
+                                Result: {task.lastResultSummary}
+                              </div>
+                            )}
+                            {(typeof task.lastArtifactsCount === 'number' || task.lastRunId) && (
+                              <div className="mt-1 flex flex-wrap gap-2 text-text-muted">
+                                {typeof task.lastArtifactsCount === 'number' && (
+                                  <span>artifacts: {task.lastArtifactsCount}</span>
+                                )}
+                                {task.lastRunId && <span>run: {task.lastRunId}</span>}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {task.enabled ? (
+                          <button
+                            onClick={() => disableTask(task.id)}
+                            className="btn btn-secondary text-xs"
+                          >
+                            {t('schedulerPanel.disable')}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => enableTask(task.id)}
+                            className="btn btn-primary text-xs"
+                          >
+                            {t('schedulerPanel.enable')}
+                          </button>
+                        )}
                         <button
-                          onClick={() => disableTask(task.id)}
+                          onClick={() => triggerTask(task.id)}
                           className="btn btn-secondary text-xs"
                         >
-                          {t('schedulerPanel.disable')}
+                          {t('schedulerPanel.runNow')}
                         </button>
-                      ) : (
                         <button
-                          onClick={() => enableTask(task.id)}
-                          className="btn btn-primary text-xs"
+                          onClick={() => handleDelete(task.id)}
+                          className="p-1 text-text-muted hover:text-red-400"
                         >
-                          {t('schedulerPanel.enable')}
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
+                          </svg>
                         </button>
-                      )}
-                      <button
-                        onClick={() => triggerTask(task.id)}
-                        className="btn btn-secondary text-xs"
-                      >
-                        {t('schedulerPanel.runNow')}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(task.id)}
-                        className="p-1 text-text-muted hover:text-red-400"
-                      >
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                          />
-                        </svg>
-                      </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+
+              <div className="w-[280px] overflow-y-auto rounded-lg border border-border bg-background p-4">
+                {selectedTask ? (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-base font-semibold text-white">{selectedTask.name}</div>
+                      <div className="mt-1 text-xs text-text-muted whitespace-pre-wrap">
+                        {selectedTask.description}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <RelationBadge label="task" value={selectedTask.id} tone="muted" />
+                      {selectedTask.execution.templateId && (
+                        <RelationBadge label="template" value={selectedTask.execution.templateId} tone="primary" />
+                      )}
+                    </div>
+                    <div className="rounded border border-border bg-surface px-3 py-2">
+                      <div className="text-xs text-text-muted">Schedule</div>
+                      <div className="mt-1 text-sm text-white">{formatSchedule(selectedTask)}</div>
+                    </div>
+                    <div className="rounded border border-border bg-surface px-3 py-2">
+                      <div className="text-xs text-text-muted">Execution</div>
+                      <div className="mt-1 text-xs text-text-secondary whitespace-pre-wrap break-words">
+                        {selectedTask.execution.templateId
+                          ? `template: ${selectedTask.execution.templateId}`
+                          : selectedTask.execution.taskDescription || 'No task content'}
+                      </div>
+                      {selectedTask.execution.input && (
+                        <pre className="mt-2 whitespace-pre-wrap break-all text-[11px] text-text-muted">
+                          {JSON.stringify(selectedTask.execution.input, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                    <div className="rounded border border-border bg-surface px-3 py-2">
+                      <div className="text-xs text-text-muted">Run Context</div>
+                      <div className="mt-1 text-xs text-text-secondary">
+                        next: {formatNextRun(selectedTask.nextRun)}
+                      </div>
+                      <div className="mt-1 text-xs text-text-secondary">
+                        runs: {selectedTask.runCount}
+                      </div>
+                    </div>
+                    {selectedTask.lastStatus && (
+                      <div className="rounded border border-border bg-surface px-3 py-2">
+                        <div className="text-xs text-text-muted">Last Result</div>
+                        <div className="mt-1 text-sm text-white">{selectedTask.lastStatus}</div>
+                        {selectedTask.lastError && (
+                          <div className="mt-1 text-xs text-red-300 whitespace-pre-wrap">
+                            {selectedTask.lastError}
+                          </div>
+                        )}
+                        {selectedTask.lastResultSummary && (
+                          <div className="mt-2 text-xs text-text-secondary whitespace-pre-wrap">
+                            {selectedTask.lastResultSummary}
+                          </div>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-text-muted">
+                          {typeof selectedTask.lastArtifactsCount === 'number' && (
+                            <span>artifacts: {selectedTask.lastArtifactsCount}</span>
+                          )}
+                          {selectedTask.lastRunId && (
+                            <button
+                              type="button"
+                              onClick={() => openRunsPanel(selectedTask.lastRunId as string)}
+                              className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+                            >
+                              run: {selectedTask.lastRunId}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-sm text-text-muted">Select a scheduler task to inspect details.</div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -422,13 +575,73 @@ function SchedulerPanel() {
 
               <div>
                 <label className="text-sm text-text-muted">{t('schedulerPanel.taskContent')}</label>
+                <select
+                  value={formData.templateId}
+                  onChange={(e) => {
+                    const nextTemplateId = e.target.value;
+                    const template = templates.find((item) => item.id === nextTemplateId) || null;
+                    const nextInputs: Record<string, string> = {};
+                    if (template) {
+                      for (const field of getTemplateInputFields(template)) {
+                        nextInputs[field.key] = field.defaultValue;
+                      }
+                    }
+                    setFormData({
+                      ...formData,
+                      templateId: nextTemplateId,
+                      templateInputs: nextInputs,
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-background border border-border rounded text-sm text-white mt-1 mb-2"
+                >
+                  <option value="">Free text task</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
                 <textarea
                   value={formData.taskDescription}
                   onChange={(e) => setFormData({ ...formData, taskDescription: e.target.value })}
                   className="w-full px-3 py-2 bg-background border border-border rounded text-sm text-white mt-1 h-24"
                   placeholder={t('schedulerPanel.placeholder.taskContent')}
+                  disabled={!!formData.templateId}
                 />
+                {formData.templateId && (
+                  <p className="text-xs text-text-muted mt-1">
+                    Selected template will be used for execution.
+                  </p>
+                )}
               </div>
+
+              {selectedTemplateFields.length > 0 && (
+                <div>
+                  <label className="text-sm text-text-muted">Template Parameters</label>
+                  <div className="mt-2 space-y-3">
+                    {selectedTemplateFields.map((field) => (
+                      <div key={field.key}>
+                        <label className="text-xs text-text-muted">{field.label}</label>
+                        <input
+                          type="text"
+                          value={formData.templateInputs[field.key] || ''}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              templateInputs: {
+                                ...formData.templateInputs,
+                                [field.key]: e.target.value,
+                              },
+                            })
+                          }
+                          placeholder={field.placeholder}
+                          className="w-full px-3 py-2 bg-background border border-border rounded text-sm text-white mt-1"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-sm text-text-muted">{t('schedulerPanel.timeout')}</label>
@@ -451,7 +664,7 @@ function SchedulerPanel() {
               <button
                 onClick={handleCreate}
                 className="btn btn-primary"
-                disabled={!formData.name || !formData.taskDescription}
+                disabled={!formData.name || (!formData.taskDescription && !formData.templateId)}
               >
                 {t('schedulerPanel.create')}
               </button>

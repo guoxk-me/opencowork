@@ -83,6 +83,7 @@ export const RENDERER_CHANNELS = {
   TASK_NODE_START: 'task:nodeStart',
   TASK_NODE_COMPLETE: 'task:nodeComplete',
   TASK_ERROR: 'task:error',
+  TASK_FAILED: 'task:failed',
   TASK_PLAN_UPDATE: 'task:planUpdate',
   TASK_TAKEOVER_REQUEST: 'task:takeoverRequest',
   TASK_COMPLETED: 'task:completed',

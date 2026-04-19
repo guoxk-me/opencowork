@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { TaskResult as UnifiedTaskResult, TaskSource } from '../../core/task/types';
 
 const MAX_MESSAGES = 500;
 const MAX_LOGS = 1000;
@@ -73,7 +74,13 @@ interface TaskState {
 
   // Task
   task: Task | null;
+  currentRunId: string | null;
+  currentSource: TaskSource | null;
+  currentResult: UnifiedTaskResult | null;
+  currentTemplateId: string | null;
   setTask: (task: Task | null) => void;
+  setCurrentRun: (runId: string | null, source?: TaskSource | null, templateId?: string | null) => void;
+  setCurrentResult: (result: UnifiedTaskResult | null) => void;
   updateTaskProgress: (current: number, total: number) => void;
   updateTaskStatus: (status: Task['status']) => void;
   updateCurrentStep: (step: string) => void;
@@ -103,6 +110,13 @@ interface TaskState {
   // Plan viewer
   showPlanViewer: boolean;
   setShowPlanViewer: (show: boolean) => void;
+
+  // Task runs panel
+  isRunsPanelOpen: boolean;
+  selectedRunsPanelRunId: string | null;
+  openRunsPanel: (runId?: string | null) => void;
+  closeRunsPanel: () => void;
+  setSelectedRunsPanelRunId: (runId: string | null) => void;
 
   // Ask User Dialog
   askUserRequest: AskUserRequest | null;
@@ -137,7 +151,14 @@ export const useTaskStore = create<TaskState>((set) => ({
 
   // Task
   task: null,
+  currentRunId: null,
+  currentSource: null,
+  currentResult: null,
+  currentTemplateId: null,
   setTask: (task) => set({ task }),
+  setCurrentRun: (currentRunId, currentSource = null, currentTemplateId = null) =>
+    set({ currentRunId, currentSource, currentTemplateId }),
+  setCurrentResult: (currentResult) => set({ currentResult }),
   updateTaskProgress: (current, total) =>
     set((state) => ({
       task: state.task ? { ...state.task, progress: { current, total } } : null,
@@ -204,6 +225,14 @@ export const useTaskStore = create<TaskState>((set) => ({
   // Plan viewer
   showPlanViewer: false,
   setShowPlanViewer: (show) => set({ showPlanViewer: show }),
+
+  // Task runs panel
+  isRunsPanelOpen: false,
+  selectedRunsPanelRunId: null,
+  openRunsPanel: (runId = null) =>
+    set({ isRunsPanelOpen: true, selectedRunsPanelRunId: runId }),
+  closeRunsPanel: () => set({ isRunsPanelOpen: false, selectedRunsPanelRunId: null }),
+  setSelectedRunsPanelRunId: (runId) => set({ selectedRunsPanelRunId: runId }),
 
   // Ask User Dialog
   askUserRequest: null,

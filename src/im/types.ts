@@ -97,6 +97,8 @@ export interface FeishuMessageEvent {
 export interface DispatchTask {
   id: string;
   description: string;
+  templateId?: string;
+  templateInput?: Record<string, unknown>;
   source: 'feishu' | 'desktop';
   priority: 'low' | 'normal' | 'high';
   userId: string;
@@ -110,6 +112,9 @@ export interface TaskStatus {
   progress?: number;
   message?: string;
   result?: any;
+  runId?: string;
+  resultSummary?: string;
+  artifactsCount?: number;
   updatedAt: number;
 }
 

@@ -3,6 +3,7 @@ import { ParsedCommand } from './types';
 export class CommandParser {
   private static readonly COMMANDS = {
     TASK: '任务',
+    TEMPLATE: '模板',
     STATUS: '状态',
     LIST: '列表',
     TAKEOVER: '接管',
@@ -23,6 +24,9 @@ export class CommandParser {
 
     if (cmd === CommandParser.COMMANDS.TASK) {
       return { command: 'task', args, raw: content };
+    }
+    if (cmd === CommandParser.COMMANDS.TEMPLATE) {
+      return { command: 'template', args, raw: content };
     }
     if (cmd === CommandParser.COMMANDS.STATUS) {
       return { command: 'status', args, raw: content };
@@ -52,6 +56,12 @@ export class CommandParser {
 
 • 任务 [描述] - 发送新任务
   例: @机器人 任务 帮我查下北京天气
+
+• 模板 列表 - 查看可用模板
+  例: @机器人 模板 列表
+
+• 模板 运行 [模板名/ID] [key=value ...] - 按模板执行任务
+  例: @机器人 模板 运行 招聘日报 keyword=AI 城市=北京
 
 • 状态 [任务ID] - 查询任务状态
   例: @机器人 状态 abc123

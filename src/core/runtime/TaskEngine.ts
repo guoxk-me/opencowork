@@ -19,6 +19,7 @@ import { SkillMatcher, createSkillMatcher } from '../../skills/skillMatcher';
 import { getSettingsManager } from '../../config/settings';
 import { PersistedTaskState } from './taskState';
 import { getTaskStateStore, TaskStateStore } from './taskStateStore';
+import { createTaskResultError, mapAgentResultToTaskResult } from '../task/resultMapper';
 
 export enum TaskStatus {
   IDLE = 'idle',
@@ -262,7 +263,7 @@ export class TaskEngine {
     } catch (error: any) {
       console.error(`[TaskEngine] Failed to start task:`, error);
       handle.status = TaskStatus.FAILED;
-      this.sendToRenderer('task:error', { handleId: handle.id, error: error.message });
+      this.sendTaskError(handle.id, error.message || 'Unknown error');
       throw error;
     } finally {
       // 任务完成后清空当前任务ID
@@ -290,10 +291,7 @@ export class TaskEngine {
       timeoutId = setTimeout(async () => {
         console.error(`[TaskEngine] Task execution timeout: ${handleId}`);
         handle.status = TaskStatus.FAILED;
-        this.sendToRenderer('task:error', {
-          handleId,
-          error: 'Task execution timeout (30 minutes)',
-        });
+        this.sendTaskError(handleId, 'Task execution timeout (30 minutes)', 'TASK_TIMEOUT');
         await this.cancel(handleId);
       }, TASK_TIMEOUT);
     };
@@ -369,7 +367,11 @@ export class TaskEngine {
               console.log('[TaskEngine] RecoveryEngine failed, falling back to Replanner');
             } else {
               // RecoveryEngine放弃，发送错误
-              this.sendToRenderer('task:error', event);
+              this.sendTaskError(
+                handleId,
+                event.error?.message || 'Unknown error',
+                event.error?.code || 'TASK_FAILED'
+              );
               break;
             }
 
@@ -532,7 +534,11 @@ export class TaskEngine {
             }
 
             // 发送错误事件
-            this.sendToRenderer('task:error', event);
+            this.sendTaskError(
+              handleId,
+              event.error?.message || 'Unknown error',
+              event.error?.code || 'TASK_FAILED'
+            );
             break;
           case 'completed':
             handle.activeAction = false;
@@ -543,13 +549,17 @@ export class TaskEngine {
 
             await this.checkSkillGeneration(handle.id);
 
-            this.sendToRenderer('task:completed', { handleId, result: event.summary });
+            this.sendTaskCompleted(handleId, event.summary);
             break;
           case 'failed':
             handle.activeAction = false;
             handle.status = TaskStatus.FAILED;
             console.log(`[TaskEngine] Task failed, sending event to renderer`);
-            this.sendToRenderer('task:error', { handleId, error: event.error });
+            this.sendTaskError(
+              handleId,
+              typeof event.error === 'string' ? event.error : event.error?.message || 'Unknown error',
+              typeof event.error === 'object' && event.error?.code ? event.error.code : 'TASK_FAILED'
+            );
             break;
         }
         handle.updatedAt = Date.now();
@@ -557,7 +567,7 @@ export class TaskEngine {
     } catch (error: any) {
       console.error(`[TaskEngine] Plan execution failed:`, error);
       handle.status = TaskStatus.FAILED;
-      this.sendToRenderer('task:error', { handleId, error: error.message || 'Unknown error' });
+      this.sendTaskError(handleId, error.message || 'Unknown error');
       throw error;
     } finally {
       clearTaskTimeout();
@@ -827,7 +837,7 @@ export class TaskEngine {
     void this.executePlan(handle.id).catch((error) => {
       console.error('[TaskEngine] Failed to continue restored task:', error);
       handle.status = TaskStatus.FAILED;
-      this.sendToRenderer('task:error', { handleId: handle.id, error: error.message });
+      this.sendTaskError(handle.id, error.message || 'Unknown error');
     });
 
     return handle;
@@ -1063,6 +1073,34 @@ export class TaskEngine {
       this.previewWindow.webContents.send(channel, data);
       console.log('[TaskEngine] Sent to previewWindow:', channel);
     }
+  }
+
+  private sendTaskCompleted(handleId: string, summary: unknown): void {
+    const taskResult = mapAgentResultToTaskResult({
+      success: true,
+      output: summary,
+      finalMessage: typeof summary === 'string' ? summary : undefined,
+    });
+
+    this.sendToRenderer('task:completed', {
+      handleId,
+      runId: handleId,
+      status: 'completed',
+      result: taskResult,
+      legacyResult: summary,
+    });
+  }
+
+  private sendTaskError(handleId: string, message: string, code: string = 'TASK_FAILED'): void {
+    const payload = {
+      handleId,
+      runId: handleId,
+      status: 'failed',
+      error: createTaskResultError(message, code),
+    };
+
+    this.sendToRenderer('task:error', payload);
+    this.sendToRenderer('task:failed', payload);
   }
 
   private async checkSkillGeneration(handleId: string): Promise<void> {

@@ -2,6 +2,26 @@
 
 All notable changes to OpenCowork are documented in this file.
 
+## Unreleased
+
+### Focus
+
+This work stream is converging OpenCowork toward the v0.12 task-model and template layer, with a stronger emphasis on reusable task runs and result-centric product surfaces.
+
+### Highlights
+
+- Added persistent `TaskResult` storage and wired task completion to save results automatically.
+- Unified task result exposure across the main run panel, history, scheduler, and IM surfaces.
+- Added template creation from successful runs and parameter validation for template execution.
+- Added parameterized template execution in the template center with separate run inputs.
+- Added result-oriented history filters for source, outcomes, runs, templates, and artifacts.
+- Added `View Run` entry points from IM recent tasks and history records.
+- Added tests for template input validation, result repository persistence, and template creation from runs.
+
+### Notes
+
+- v0.12 is still in progress; the core task/result/template loop is now in place, but final product polish and broader scenario coverage remain.
+
 ## v0.10.10 - 2026-04-18
 
 ### Release focus

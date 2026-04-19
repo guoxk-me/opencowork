@@ -8,7 +8,7 @@ import { sessionManager } from './SessionManager';
 import { BrowserExecutor } from '../core/executor/BrowserExecutor';
 import { CLIExecutor } from '../core/executor/CLIExecutor';
 import { ActionType } from '../core/action/ActionSchema';
-import { createMainAgent, MainAgent, AgentStep } from '../agents/mainAgent';
+import { createMainAgent, MainAgent, AgentStep, AgentResult } from '../agents/mainAgent';
 import { ScheduleType } from '../scheduler/types';
 import { getIMConfigStore } from '../config/imConfig';
 import { getSettingsManager } from '../config/settings';
@@ -22,6 +22,13 @@ import {
   getMCPSamplingService,
   getMCPServerMode,
 } from '../mcp';
+import { getTaskOrchestrator } from '../core/task/TaskOrchestrator';
+import { createTaskResultError, mapAgentResultToTaskResult } from '../core/task/resultMapper';
+import { getTaskResultRepository } from '../core/task/TaskResultRepository';
+import { getTaskTemplateRepository } from '../core/task/TaskTemplateRepository';
+import { getTaskRunRepository } from '../core/task/TaskRunRepository';
+import { resolveTemplateInput } from '../core/task/templateUtils';
+import { getDispatchService } from '../im/DispatchService';
 
 const taskEngine = new TaskEngine();
 const execFileAsync = promisify(execFile);
@@ -96,7 +103,7 @@ getMCPServerMode().registerTool(
 getMCPServerMode().registerTool('task:list', async () => taskEngine.listTasks(), 'List tasks');
 getMCPServerMode().registerTool(
   'task:execute',
-  async ({ task, threadId }) => IPC_HANDLERS['task:start'](null, null, { task, threadId }),
+  async ({ task, threadId }) => IPC_HANDLERS['task:start'](null, null, { task, threadId, source: 'mcp' }),
   'Execute a new task',
   { task: 'string', threadId: 'string?' }
 );
@@ -227,6 +234,61 @@ export function getMainWindowRef(): BrowserWindow | null {
   return mainWindowRef;
 }
 
+async function ensureSharedAgent(
+  mainWindow: BrowserWindow | null,
+  previewWindow: BrowserWindow | null
+): Promise<MainAgent> {
+  const AGENT_INIT_TIMEOUT_MS = 60000;
+
+  if (!sharedMainAgent && !isAgentInitializing) {
+    isAgentInitializing = true;
+    console.log('[IPC] Creating shared MainAgent...');
+    agentInitPromise = new Promise((resolve) => {
+      agentInitResolver = resolve;
+    });
+
+    const initPromise = createMainAgent({
+      logger: { level: 'debug', output: 'console' },
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Agent initialization timeout')), AGENT_INIT_TIMEOUT_MS)
+    );
+
+    try {
+      sharedMainAgent = await Promise.race([initPromise, timeoutPromise]);
+      sharedMainAgent.setMainWindow(mainWindow);
+      sharedMainAgent.setPreviewWindow(previewWindow);
+      isAgentInitializing = false;
+      if (agentInitResolver) {
+        agentInitResolver();
+        agentInitPromise = null;
+        agentInitResolver = null;
+      }
+    } catch (initError) {
+      isAgentInitializing = false;
+      agentInitPromise = null;
+      agentInitResolver = null;
+      throw initError;
+    }
+  } else if (isAgentInitializing && agentInitPromise) {
+    await Promise.race([
+      agentInitPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Agent init wait timeout')), AGENT_INIT_TIMEOUT_MS)
+      ),
+    ]);
+  }
+
+  if (!sharedMainAgent) {
+    throw new Error('Agent initialization failed');
+  }
+
+  sharedMainAgent.setMainWindow(mainWindow);
+  sharedMainAgent.setPreviewWindow(previewWindow);
+  return sharedMainAgent;
+}
+
 type IpcHandler = (
   mainWindow: BrowserWindow | null,
   previewWindow: BrowserWindow | null,
@@ -235,70 +297,18 @@ type IpcHandler = (
 
 export const IPC_HANDLERS: Record<string, IpcHandler> = {
   // 任务相关 (v0.4 - 使用 MainAgent)
-  'task:start': async (mainWindow, previewWindow, { task, threadId }) => {
-    console.log('[IPC] task:start:', task, 'threadId:', threadId);
-
-    const AGENT_INIT_TIMEOUT_MS = 60000;
+  'task:start': async (mainWindow, previewWindow, { task, threadId, source = 'chat', templateId }) => {
+    console.log('[IPC] task:start:', task, 'threadId:', threadId, 'source:', source);
 
     try {
-      if (!sharedMainAgent && !isAgentInitializing) {
-        isAgentInitializing = true;
-        console.log('[IPC] Creating shared MainAgent...');
-        agentInitPromise = new Promise((resolve) => {
-          agentInitResolver = resolve;
-        });
-
-        const initPromise = createMainAgent({
-          logger: { level: 'debug', output: 'console' },
-        });
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Agent initialization timeout')), AGENT_INIT_TIMEOUT_MS)
-        );
-
-        try {
-          sharedMainAgent = await Promise.race([initPromise, timeoutPromise]);
-          sharedMainAgent.setMainWindow(mainWindow);
-          sharedMainAgent.setPreviewWindow(previewWindow);
-          isAgentInitializing = false;
-          console.log('[IPC] Shared MainAgent created, threadId:', sharedMainAgent.getThreadId());
-          if (agentInitResolver) {
-            agentInitResolver();
-            agentInitPromise = null;
-            agentInitResolver = null;
-          }
-        } catch (initError) {
-          isAgentInitializing = false;
-          agentInitPromise = null;
-          agentInitResolver = null;
-          throw initError;
-        }
-      } else if (isAgentInitializing && agentInitPromise) {
-        console.log('[IPC] Agent is still initializing, waiting...');
-        try {
-          await Promise.race([
-            agentInitPromise,
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Agent init wait timeout')), AGENT_INIT_TIMEOUT_MS)
-            ),
-          ]);
-        } catch (timeoutError) {
-          console.error('[IPC] Agent init wait timeout');
-          return {
-            success: false,
-            error: 'Agent initialization timeout',
-          };
-        }
-      }
-
-      const agent = sharedMainAgent;
-      if (!agent) {
-        console.error('[IPC] Agent not initialized');
+      const agent = await ensureSharedAgent(mainWindow, previewWindow);
+      if (agent.getStatus() === 'running') {
         return {
-          success: false,
-          error: 'Agent initialization failed',
+          accepted: false,
+          error: 'A task is already running',
         };
       }
+
       if (threadId) {
         agent.setThreadId(threadId);
         sharedThreadId = threadId;
@@ -309,28 +319,62 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
       }
 
       const handleId = agent.getThreadId();
-      console.log('[IPC] Starting MainAgent, handleId:', handleId);
+      const taskOrchestrator = getTaskOrchestrator();
+      const run = taskOrchestrator.startRun({
+        runId: handleId,
+        source,
+        title: task,
+        prompt: task,
+        templateId,
+        sessionId: handleId,
+        metadata: {
+          threadId: handleId,
+        },
+      });
 
-      const result = await agent.run(task);
+      let latestAgentResult: AgentResult | null = null;
 
-      console.log('[IPC] MainAgent completed, result:', result.success);
+      void taskOrchestrator
+        .executeRun(handleId, async () => {
+          latestAgentResult = await agent.run(task);
+          return mapAgentResultToTaskResult(latestAgentResult);
+        })
+        .then(async (result) => {
+          console.log('[IPC] MainAgent completed, result:', result.summary);
 
-      try {
-        const taskEngine = getTaskEngine();
-        await taskEngine.checkSkillGenerationAfterTask(result, {
-          taskDescription: task,
-          actions: mapAgentStepsToSkillActions(result.steps),
+          try {
+            if (latestAgentResult) {
+              const taskEngine = getTaskEngine();
+              await taskEngine.checkSkillGenerationAfterTask(latestAgentResult, {
+                taskDescription: task,
+                actions: mapAgentStepsToSkillActions(latestAgentResult.steps),
+              });
+            }
+          } catch (error) {
+            console.warn('[IPC] checkSkillGeneration error:', error);
+          }
+        })
+        .catch((error: any) => {
+          console.error('[IPC] Background task:start error:', error);
+          const taskError = createTaskResultError(error?.message || String(error));
+          mainWindow?.webContents.send('task:error', {
+            handleId,
+            runId: handleId,
+            status: 'failed',
+            error: taskError,
+          });
+          mainWindow?.webContents.send('task:failed', {
+            handleId,
+            runId: handleId,
+            status: 'failed',
+            error: taskError,
+          });
         });
-      } catch (error) {
-        console.warn('[IPC] checkSkillGeneration error:', error);
-      }
 
       return {
-        success: result.success,
+        accepted: true,
         handle: handleId,
-        output: result.output,
-        error: result.error,
-        duration: result.duration,
+        run,
       };
     } catch (error: any) {
       console.error('[IPC] task:start error:', error);
@@ -344,6 +388,8 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   },
 
   'task:pause': async (mainWindow, previewWindow, { handleId }) => {
+    const orchestrator = getTaskOrchestrator();
+    orchestrator.pauseRun(handleId);
     if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
       sharedMainAgent.pause();
     } else {
@@ -354,6 +400,8 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   },
 
   'task:resume': async (mainWindow, previewWindow, { handleId }) => {
+    const orchestrator = getTaskOrchestrator();
+    orchestrator.resumeRun(handleId);
     if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
       sharedMainAgent.resume();
     } else {
@@ -364,6 +412,8 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   },
 
   'task:interrupt': async (mainWindow, previewWindow, { handleId, reason }) => {
+    const orchestrator = getTaskOrchestrator();
+    orchestrator.pauseRun(handleId);
     if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
       const state = await sharedMainAgent.interrupt(reason);
       mainWindow?.webContents.send('task:statusUpdate', { handleId, status: 'paused' });
@@ -423,6 +473,8 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   },
 
   'task:stop': async (mainWindow, previewWindow, { handleId }) => {
+    const orchestrator = getTaskOrchestrator();
+    orchestrator.cancelRun(handleId);
     if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
       sharedMainAgent.requestCancel();
     } else {
@@ -433,6 +485,8 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   },
 
   'task:restart': async (mainWindow, previewWindow, { handleId }) => {
+    const orchestrator = getTaskOrchestrator();
+    orchestrator.cancelRun(handleId);
     if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
       sharedMainAgent.requestCancel();
       mainWindow?.webContents.send('task:statusUpdate', { handleId, status: 'cancelled' });
@@ -444,6 +498,8 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   },
 
   'task:complete': async (mainWindow, previewWindow, { handleId }) => {
+    const orchestrator = getTaskOrchestrator();
+    orchestrator.markCompleted(handleId);
     if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
       sharedMainAgent.requestCancel();
       mainWindow?.webContents.send('task:statusUpdate', { handleId, status: 'completed' });
@@ -454,12 +510,74 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   },
 
   'task:status': async (mainWindow, previewWindow, { handleId }) => {
+    const orchestrator = getTaskOrchestrator();
+    const snapshot = orchestrator.getStatusSnapshot(handleId);
     if (sharedMainAgent && sharedMainAgent.getThreadId() === handleId) {
-      const status = sharedMainAgent.getStatus();
-      return { status, handleId };
+      return { status: sharedMainAgent.getStatus(), handleId, run: snapshot.run, orchestratedStatus: snapshot.status };
     }
     const status = taskEngine.getState(handleId);
-    return { status };
+    return { status, run: snapshot.run, orchestratedStatus: snapshot.status };
+  },
+
+  'task:run:get': async (mainWindow, previewWindow, { runId }) => {
+    try {
+      return getTaskRunRepository().getById(runId);
+    } catch (error: any) {
+      console.error('[IPC] task:run:get error:', error);
+      return null;
+    }
+  },
+
+  'task:run:details': async (mainWindow, previewWindow, { runId }) => {
+    try {
+      const run = getTaskRunRepository().getById(runId);
+      if (!run) {
+        return null;
+      }
+
+      const result = run.resultId ? getTaskResultRepository().getById(run.resultId) : null;
+      const template = run.templateId ? await getTaskTemplateRepository().getById(run.templateId) : null;
+      const { getHistoryService } = await import('../history/historyService.js');
+      const historyService = getHistoryService();
+      const history = await historyService.getTaskByRunId(runId);
+
+      return {
+        run,
+        result,
+        template,
+        history,
+      };
+    } catch (error: any) {
+      console.error('[IPC] task:run:details error:', error);
+      return null;
+    }
+  },
+
+  'task:result:get': async (mainWindow, previewWindow, { resultId }) => {
+    try {
+      return getTaskResultRepository().getById(resultId);
+    } catch (error: any) {
+      console.error('[IPC] task:result:get error:', error);
+      return null;
+    }
+  },
+
+  'task:result:list': async (mainWindow, previewWindow, { limit = 50 } = {}) => {
+    try {
+      return getTaskResultRepository().listRecent(limit);
+    } catch (error: any) {
+      console.error('[IPC] task:result:list error:', error);
+      return [];
+    }
+  },
+
+  'task:run:list': async (mainWindow, previewWindow, { limit = 50 } = {}) => {
+    try {
+      return getTaskRunRepository().listRecent(limit);
+    } catch (error: any) {
+      console.error('[IPC] task:run:list error:', error);
+      return [];
+    }
   },
 
   'task:checkLoginPopup': async () => {
@@ -590,6 +708,22 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
         wecom: 'disconnected',
         slack: 'disconnected',
       };
+    }
+  },
+
+  'im:recentTasks': async (mainWindow, previewWindow, { limit = 20 } = {}) => {
+    try {
+      const dispatchService = getDispatchService();
+      if (!dispatchService) {
+        return [];
+      }
+      return dispatchService
+        .getAllTasks()
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, limit);
+    } catch (error: any) {
+      console.error('[IPC] im:recentTasks error:', error);
+      return [];
     }
   },
 
@@ -1101,10 +1235,286 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
 
       const result = await IPC_HANDLERS['task:start'](mainWindow, previewWindow, {
         task: task.task,
+        threadId: task.metadata?.threadId,
+        source: 'replay',
       });
       return { success: true, data: result };
     } catch (error: any) {
       console.error('[IPC] history:replay error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  'template:createFromHistory': async (
+    mainWindow,
+    previewWindow,
+    { taskId }: { taskId: string }
+  ) => {
+    try {
+      const { getHistoryService } = await import('../history/historyService.js');
+      const historyService = getHistoryService();
+      const task = await historyService.getTask(taskId);
+      if (!task) {
+        return { success: false, error: `Task not found: ${taskId}` };
+      }
+
+      const repository = getTaskTemplateRepository();
+      if (task.metadata?.runId) {
+        const template = await repository.createFromRun(task.metadata.runId);
+        await historyService.updateTaskMetadata(taskId, {
+          templateId: template.id,
+        });
+        return { success: true, data: template };
+      }
+
+      const template = await repository.createFromHistory({
+        name: task.task.slice(0, 60),
+        description: task.result?.summary || task.task,
+        prompt: task.task,
+        executionProfile: 'browser-first',
+      });
+
+      await historyService.updateTaskMetadata(taskId, {
+        templateId: template.id,
+      });
+
+      return { success: true, data: template };
+    } catch (error: any) {
+      console.error('[IPC] template:createFromHistory error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  'template:createFromRun': async (
+    mainWindow,
+    previewWindow,
+    { runId }: { runId: string }
+  ) => {
+    try {
+      const repository = getTaskTemplateRepository();
+      const template = await repository.createFromRun(runId);
+
+      const { getHistoryService } = await import('../history/historyService.js');
+      const historyService = getHistoryService();
+      const historyTask = await historyService.getTaskByRunId(runId);
+      if (historyTask) {
+        await historyService.updateTaskMetadata(historyTask.id, {
+          templateId: template.id,
+        });
+      }
+
+      return { success: true, data: template };
+    } catch (error: any) {
+      console.error('[IPC] template:createFromRun error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  'template:list': async () => {
+    try {
+      const repository = getTaskTemplateRepository();
+      return await repository.list();
+    } catch (error: any) {
+      console.error('[IPC] template:list error:', error);
+      return [];
+    }
+  },
+
+  'template:get': async (mainWindow, previewWindow, { templateId }: { templateId: string }) => {
+    try {
+      const repository = getTaskTemplateRepository();
+      return await repository.getById(templateId);
+    } catch (error: any) {
+      console.error('[IPC] template:get error:', error);
+      return null;
+    }
+  },
+
+  'template:delete': async (
+    mainWindow,
+    previewWindow,
+    { templateId }: { templateId: string }
+  ) => {
+    try {
+      const repository = getTaskTemplateRepository();
+      await repository.delete(templateId);
+      return { success: true };
+    } catch (error: any) {
+      console.error('[IPC] template:delete error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  'template:update': async (mainWindow, previewWindow, payload) => {
+    try {
+      const repository = getTaskTemplateRepository();
+      const existing = await repository.getById(payload?.id);
+      if (!existing) {
+        return { success: false, error: `Template not found: ${payload?.id}` };
+      }
+
+      await repository.update({
+        ...existing,
+        name: payload?.name || existing.name,
+        description: payload?.description || existing.description,
+        inputSchema: payload?.inputSchema || existing.inputSchema,
+        defaultInput: payload?.defaultInput || existing.defaultInput,
+        executionProfile: payload?.executionProfile || existing.executionProfile,
+        recommendedSkills: payload?.recommendedSkills || existing.recommendedSkills,
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('[IPC] template:update error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  'template:create': async (mainWindow, previewWindow, payload) => {
+    try {
+      const repository = getTaskTemplateRepository();
+      const template = await repository.createFromHistory({
+        name: payload?.name || 'Untitled template',
+        description: payload?.description || payload?.prompt || 'Reusable task template',
+        prompt: payload?.prompt || payload?.description || '',
+        inputSchema: payload?.inputSchema,
+        defaultInput: payload?.defaultInput,
+        executionProfile: payload?.executionProfile || 'browser-first',
+      });
+      return { success: true, data: template };
+    } catch (error: any) {
+      console.error('[IPC] template:create error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  'artifact:open': async (
+    mainWindow,
+    previewWindow,
+    { uri }: { uri: string }
+  ) => {
+    try {
+      const { shell } = await import('electron');
+      if (/^https?:\/\//.test(uri)) {
+        await shell.openExternal(uri);
+        return { success: true, strategy: 'shell.openExternal' };
+      }
+
+      const openResult = await shell.openPath(uri);
+      if (!openResult) {
+        return { success: true, strategy: 'shell.openPath' };
+      }
+
+      return { success: false, error: openResult };
+    } catch (error: any) {
+      console.error('[IPC] artifact:open error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  'template:run': async (
+    mainWindow,
+    previewWindow,
+    { templateId, input }: { templateId: string; input?: Record<string, unknown> }
+  ) => {
+    try {
+      const repository = getTaskTemplateRepository();
+      const template = await repository.getById(templateId);
+      if (!template) {
+        return { success: false, error: `Template not found: ${templateId}` };
+      }
+
+      const resolved = resolveTemplateInput(template, input);
+
+      const result = await IPC_HANDLERS['task:start'](mainWindow, previewWindow, {
+        task: resolved.prompt,
+        source: 'chat',
+        templateId,
+      });
+
+      return { success: true, data: result };
+    } catch (error: any) {
+      console.error('[IPC] template:run error:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // 概览指标 (v0.12)
+  'overview:getMetrics': async (mainWindow, previewWindow, { dateRange }: { dateRange?: { start: number; end: number } } = {}) => {
+    try {
+      const { getHistoryService } = await import('../history/historyService.js');
+      const { getScheduler } = await import('../scheduler/scheduler.js');
+      const dispatchService = getDispatchService();
+
+      const historyService = getHistoryService();
+      const scheduler = getScheduler();
+
+      const startDate = dateRange?.start || Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const endDate = dateRange?.end || Date.now();
+
+      const allTasks = await historyService.listTasks({
+        startDate,
+        endDate,
+        limit: 1000,
+      });
+
+      const completedTasks = allTasks.filter((t) => t.status === 'completed');
+      const failedTasks = allTasks.filter((t) => t.status === 'failed');
+      const runningTasks = allTasks.filter((t) => t.status === 'running');
+
+      const totalDuration = allTasks.reduce((sum, t) => sum + (t.duration || 0), 0);
+      const avgDuration = allTasks.length > 0 ? totalDuration / allTasks.length : 0;
+
+      const successRate = allTasks.length > 0 ? (completedTasks.length / allTasks.length) * 100 : 0;
+
+      const sourceStats: Record<string, number> = {};
+      allTasks.forEach((task) => {
+        const source = task.metadata?.source || 'unknown';
+        sourceStats[source] = (sourceStats[source] || 0) + 1;
+      });
+
+      const dailyStats: Record<string, { completed: number; failed: number; total: number }> = {};
+      allTasks.forEach((task) => {
+        const date = new Date(task.startTime).toISOString().split('T')[0];
+        if (!dailyStats[date]) {
+          dailyStats[date] = { completed: 0, failed: 0, total: 0 };
+        }
+        dailyStats[date].total++;
+        if (task.status === 'completed') dailyStats[date].completed++;
+        if (task.status === 'failed') dailyStats[date].failed++;
+      });
+
+      const schedulerTasks = scheduler ? await scheduler.getAllTasks() : [];
+      const activeSchedules = schedulerTasks.filter((t: any) => t.enabled).length;
+
+      const imStats = dispatchService ? (dispatchService as any).getRecentTaskStats?.() || { total: 0, pending: 0, completed: 0, failed: 0 } : { total: 0, pending: 0, completed: 0, failed: 0 };
+
+      return {
+        success: true,
+        data: {
+          summary: {
+            totalTasks: allTasks.length,
+            completedTasks: completedTasks.length,
+            failedTasks: failedTasks.length,
+            runningTasks: runningTasks.length,
+            successRate: Math.round(successRate * 10) / 10,
+            avgDurationMs: Math.round(avgDuration),
+            totalDurationMs: totalDuration,
+          },
+          sourceStats,
+          dailyStats: Object.entries(dailyStats)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .slice(-14)
+            .reduce((obj, [k, v]) => ({ ...obj, [k]: v }), {}),
+          schedulerStats: {
+            totalSchedules: schedulerTasks.length,
+            activeSchedules,
+          },
+          imStats,
+        },
+      };
+    } catch (error: any) {
+      console.error('[IPC] overview:getMetrics error:', error);
       return { success: false, error: error.message };
     }
   },

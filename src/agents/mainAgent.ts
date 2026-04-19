@@ -36,6 +36,7 @@ import { createSkillMatcher, SkillSource } from '../skills/skillMatcher';
 import { getMCPClient } from '../mcp';
 import { getSkillRecorder } from '../skills/skillRecorder';
 import { getSkillRunner } from '../skills/skillRunner';
+import { createTaskResultError, mapAgentResultToTaskResult } from '../core/task/resultMapper';
 
 function cleanHtmlText(text: string): string {
   return text
@@ -1189,23 +1190,36 @@ export class MainAgent {
 
   private sendTaskCompleted(result: any): void {
     const finalMessage = result?.result?.finalMessage;
+    const taskResult = mapAgentResultToTaskResult({
+      success: true,
+      output: result?.result?.output,
+      finalMessage,
+    });
     if (finalMessage) {
       this.conversationHistory.push({ role: 'assistant', content: finalMessage });
     }
     this.sendToRenderer('task:completed', {
       type: 'task_completed',
       handleId: this.threadId,
-      result,
+      runId: this.threadId,
+      status: 'completed',
+      result: taskResult,
+      legacyResult: result?.result,
     });
   }
 
   private sendTaskError(error: string): void {
+    const taskError = createTaskResultError(error);
     this.conversationHistory.push({ role: 'assistant', content: `任务错误: ${error}` });
-    this.sendToRenderer('task:error', {
+    const payload = {
       type: 'task_error',
       handleId: this.threadId,
-      error,
-    });
+      runId: this.threadId,
+      status: 'failed',
+      error: taskError,
+    };
+    this.sendToRenderer('task:error', payload);
+    this.sendToRenderer('task:failed', payload);
   }
 
   async initialize(): Promise<void> {
@@ -1256,6 +1270,8 @@ export class MainAgent {
         const historyService = getHistoryService();
         const historyRecord = await historyService.startTask(task, {
           threadId: this.threadId,
+          runId: this.threadId,
+          source: 'chat',
           model: this.config.modelName || loadLLMConfig().model || 'unknown',
         });
         this.currentHistoryTaskId = historyRecord.id;
@@ -1348,9 +1364,19 @@ export class MainAgent {
       try {
         const historyService = getHistoryService();
         if (this.currentHistoryTaskId) {
+          const taskResult = mapAgentResultToTaskResult({
+            success: true,
+            output: result,
+            finalMessage,
+          });
           await historyService.completeTask(this.currentHistoryTaskId, {
             success: true,
             output: result,
+            summary: taskResult.summary,
+            artifacts: taskResult.artifacts,
+            rawOutput: taskResult.rawOutput,
+            structuredData: taskResult.structuredData,
+            reusable: taskResult.reusable,
           });
           for (const step of steps) {
             await historyService.addStep(this.currentHistoryTaskId, {
@@ -1400,9 +1426,13 @@ export class MainAgent {
       try {
         const historyService = getHistoryService();
         if (this.currentHistoryTaskId) {
+          const taskError = createTaskResultError(friendlyError);
           await historyService.completeTask(this.currentHistoryTaskId, {
             success: false,
             error: friendlyError,
+            summary: friendlyError,
+            taskError,
+            reusable: false,
           });
         }
       } catch (historyError) {

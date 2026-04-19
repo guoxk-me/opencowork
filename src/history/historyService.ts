@@ -170,7 +170,17 @@ export class HistoryService {
 
   async completeTask(
     taskId: string,
-    result: { success: boolean; output?: unknown; error?: string }
+    result: {
+      success: boolean;
+      output?: unknown;
+      error?: string;
+      summary?: string;
+      artifacts?: import('./taskHistory').TaskResult['artifacts'];
+      rawOutput?: unknown;
+      structuredData?: unknown;
+      taskError?: import('./taskHistory').TaskResult['taskError'];
+      reusable?: boolean;
+    }
   ): Promise<void> {
     const mutex = this.getTaskMutex(taskId);
     return mutex.lock(async () => {
@@ -215,6 +225,30 @@ export class HistoryService {
   async getTask(taskId: string): Promise<TaskHistoryRecord | null> {
     const task = await this.store.getTask(taskId);
     return task ? deepClone(task) : null;
+  }
+
+  async getTaskByRunId(runId: string): Promise<TaskHistoryRecord | null> {
+    const tasks = await this.store.listTasks({ limit: 500 });
+    const match = tasks.find((task) => task.metadata?.runId === runId) || null;
+    return match ? deepClone(match) : null;
+  }
+
+  async updateTaskMetadata(
+    taskId: string,
+    metadata: Partial<NonNullable<TaskHistoryRecord['metadata']>>
+  ): Promise<void> {
+    const mutex = this.getTaskMutex(taskId);
+    return mutex.lock(async () => {
+      const task = await this.store.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task not found: ${taskId}`);
+      }
+      task.metadata = {
+        ...(task.metadata || {}),
+        ...metadata,
+      };
+      await this.store.saveTask(task);
+    });
   }
 
   async listTasks(options: HistoryQueryOptions = {}): Promise<TaskHistoryRecord[]> {

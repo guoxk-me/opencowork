@@ -2,8 +2,13 @@
 
 import { BrowserWindow } from 'electron';
 import { QueuedTask, TaskExecutionResult, ExecutorMode, ExecutorConfig } from './types';
-import { HistoryService } from '../history/historyService';
+import { getHistoryService, HistoryService } from '../history/historyService';
 import { createMainAgent, AgentResult } from '../agents/mainAgent';
+import { mapAgentResultToTaskResult } from '../core/task/resultMapper';
+import { getTaskTemplateRepository } from '../core/task/TaskTemplateRepository';
+import { resolveTemplateInput } from '../core/task/templateUtils';
+import { getTaskOrchestrator } from '../core/task/TaskOrchestrator';
+import { createTaskEntityId } from '../core/task/types';
 
 const DEFAULT_TASK_TIMEOUT = 300000; // 5 minutes
 
@@ -13,7 +18,7 @@ export class TaskExecutor {
   private mainWindow: BrowserWindow | null = null;
 
   constructor(config: ExecutorConfig = { mode: ExecutorMode.INTEGRATED }) {
-    this.historyService = new HistoryService();
+    this.historyService = getHistoryService();
     this.config = config;
   }
 
@@ -21,7 +26,7 @@ export class TaskExecutor {
     this.mainWindow = window;
   }
 
-  async execute(task: QueuedTask): Promise<TaskExecutionResult> {
+  async execute(task: QueuedTask): Promise<TaskExecutionResult & { resultSummary?: string; artifactsCount?: number; runId?: string }> {
     const scheduledTask = task.scheduledTask;
     const startTime = Date.now();
     const timeout = scheduledTask.execution?.timeout || DEFAULT_TASK_TIMEOUT;
@@ -38,37 +43,73 @@ export class TaskExecutor {
     });
 
     try {
+      const runId = createTaskEntityId('scheduler-run');
+      const taskOrchestrator = getTaskOrchestrator();
+      taskOrchestrator.startRun({
+        runId,
+        source: 'scheduler',
+        title: scheduledTask.name,
+        prompt: scheduledTask.execution.taskDescription || scheduledTask.description,
+        params: scheduledTask.execution.input,
+        templateId: scheduledTask.execution.templateId,
+        metadata: {
+          scheduledTaskId: scheduledTask.id,
+        },
+      });
+
       const historyRecord = await this.historyService.createTask(
-        `[定时] ${scheduledTask.name}: ${scheduledTask.execution.taskDescription}`,
+        `[定时] ${scheduledTask.name}: ${scheduledTask.execution.taskDescription || scheduledTask.execution.templateId || scheduledTask.description}`,
         {
           source: 'scheduler',
           scheduledTaskId: scheduledTask.id,
           scheduledTaskName: scheduledTask.name,
+          templateId: scheduledTask.execution.templateId,
+          runId,
         }
       );
       historyRecordId = historyRecord.id;
 
       await this.historyService.startTaskById(historyRecord.id);
 
-      let executionResult: Promise<void>;
+      let executionResult: Promise<AgentResult | null>;
       if (this.config.mode === ExecutorMode.INTEGRATED) {
         executionResult = this.executeWithMainAgent(
           scheduledTask.execution.taskDescription,
+          scheduledTask.execution.templateId,
+          scheduledTask.execution.input,
           scheduledTask.execution.timeout
         );
       } else {
         executionResult = this.executeStandalone(
-          scheduledTask.execution.taskDescription,
+          scheduledTask.execution.taskDescription || scheduledTask.description,
           scheduledTask.execution.timeout
         );
       }
 
-      await Promise.race([executionResult, timeoutPromise]);
+      const taskResult = await taskOrchestrator.executeRun(runId, async () => {
+        const agentResult = await Promise.race([executionResult, timeoutPromise]);
+        return agentResult
+          ? mapAgentResultToTaskResult(agentResult)
+          : mapAgentResultToTaskResult({ success: true, output: 'Task completed successfully' });
+      });
 
       await this.historyService.completeTask(historyRecord.id, {
         success: true,
-        output: 'Task completed successfully',
+        output: taskResult.rawOutput,
+        summary: taskResult.summary,
+        artifacts: taskResult.artifacts,
+        rawOutput: taskResult.rawOutput,
+        structuredData: taskResult.structuredData,
+        reusable: taskResult.reusable,
       });
+
+      if (historyRecordId) {
+        await this.historyService.updateTaskMetadata(historyRecordId, {
+          source: 'scheduler',
+          resultSummary: taskResult.summary,
+          artifactsCount: taskResult.artifacts.length,
+        });
+      }
 
       return {
         taskId: scheduledTask.id,
@@ -77,6 +118,9 @@ export class TaskExecutor {
         endTime: Date.now(),
         duration: Date.now() - startTime,
         retryCount: task.retryCount,
+        runId,
+        resultSummary: taskResult.summary,
+        artifactsCount: taskResult.artifacts.length,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -88,6 +132,8 @@ export class TaskExecutor {
           await this.historyService.completeTask(historyRecordId, {
             success: false,
             error: errorMessage,
+            summary: errorMessage,
+            reusable: false,
           });
         } catch (e) {
           console.error('[TaskExecutor] Failed to update history:', e);
@@ -106,8 +152,22 @@ export class TaskExecutor {
     }
   }
 
-  private async executeWithMainAgent(description: string, timeout?: number): Promise<void> {
-    console.log('[TaskExecutor] Execute with MainAgent:', description);
+  private async executeWithMainAgent(
+    description?: string,
+    templateId?: string,
+    input?: Record<string, unknown>,
+    timeout?: number
+  ): Promise<AgentResult> {
+    let resolvedDescription = description || '';
+    if (templateId) {
+      const template = await getTaskTemplateRepository().getById(templateId);
+      if (!template) {
+        throw new Error(`Template not found: ${templateId}`);
+      }
+      resolvedDescription = resolveTemplateInput(template, input).prompt;
+    }
+
+    console.log('[TaskExecutor] Execute with MainAgent:', resolvedDescription);
 
     const agent = await createMainAgent({
       threadId: `scheduler-${Date.now()}`,
@@ -118,7 +178,7 @@ export class TaskExecutor {
       agent.setMainWindow(this.mainWindow);
     }
 
-    const immediateTask = `请立即执行以下任务，不要创建定时任务：${description}`;
+    const immediateTask = `请立即执行以下任务，不要创建定时任务：${resolvedDescription}`;
     const result: AgentResult = await agent.run(immediateTask);
 
     if (!result.success) {
@@ -126,11 +186,17 @@ export class TaskExecutor {
     }
 
     console.log('[TaskExecutor] Agent completed:', result.finalMessage);
+    return result;
   }
 
-  private async executeStandalone(description: string, timeout?: number): Promise<void> {
+  private async executeStandalone(description: string, timeout?: number): Promise<AgentResult | null> {
     console.log('[TaskExecutor] Execute standalone (placeholder):', description);
     await this.simulateExecution(timeout);
+    return {
+      success: true,
+      output: 'Task completed successfully',
+      finalMessage: 'Task completed successfully',
+    };
   }
 
   private async simulateExecution(timeout?: number): Promise<void> {

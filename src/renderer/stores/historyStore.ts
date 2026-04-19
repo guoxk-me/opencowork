@@ -24,6 +24,8 @@ interface HistoryState {
   loadTaskDetail: (taskId: string) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
   replayTask: (taskId: string) => Promise<void>;
+  saveTaskAsTemplate: (taskId: string) => Promise<void>;
+  runTemplate: (templateId: string, input?: Record<string, unknown>) => Promise<void>;
   searchTasks: (query: string) => Promise<void>;
   summarizeSearch: (query: string) => Promise<void>;
   clearSelectedTask: () => void;
@@ -113,13 +115,64 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
           : get().tasks.find((task) => task.id === taskId) || null;
 
       useTaskStore.getState().setTask({
-        id: payload?.handle || `task-${Date.now()}`,
+        id: payload?.run?.id || payload?.handle || `task-${Date.now()}`,
         status: 'executing',
         description: taskRecord?.task || '重放任务',
         progress: { current: 0, total: 0 },
       });
+      useTaskStore
+        .getState()
+        .setCurrentRun(
+          payload?.run?.id || payload?.handle || null,
+          payload?.run?.source || 'replay',
+          payload?.run?.templateId || null
+        );
+      useTaskStore.getState().setCurrentResult(null);
     } catch (error) {
       console.error('[HistoryStore] Failed to replay task:', error);
+    }
+  },
+
+  saveTaskAsTemplate: async (taskId) => {
+    try {
+      const detailResponse = await window.electron.invoke('history:get', { taskId });
+      const task = detailResponse?.data?.data || detailResponse?.data || null;
+
+      if (task?.metadata?.runId) {
+        await window.electron.invoke('template:createFromRun', { runId: task.metadata.runId });
+        return;
+      }
+
+      await window.electron.invoke('template:createFromHistory', { taskId });
+    } catch (error) {
+      console.error('[HistoryStore] Failed to save task as template:', error);
+    }
+  },
+
+  runTemplate: async (templateId, input) => {
+    try {
+      const result = await window.electron.invoke('template:run', { templateId, input });
+      const payload = result?.data?.data || result?.data || result;
+      if (!result?.success || payload?.success === false) {
+        throw new Error(payload?.error || result?.error || '运行模板失败');
+      }
+
+      useTaskStore.getState().setTask({
+        id: payload?.run?.id || payload?.handle || `task-${Date.now()}`,
+        status: 'executing',
+        description: payload?.run?.title || '模板任务',
+        progress: { current: 0, total: 0 },
+      });
+      useTaskStore
+        .getState()
+        .setCurrentRun(
+          payload?.run?.id || payload?.handle || null,
+          payload?.run?.source || 'chat',
+          payload?.run?.templateId || templateId
+        );
+      useTaskStore.getState().setCurrentResult(null);
+    } catch (error) {
+      console.error('[HistoryStore] Failed to run template:', error);
     }
   },
 

@@ -76,7 +76,11 @@ export class Scheduler extends EventEmitter {
   private async handleTaskComplete(task: QueuedTask, result: TaskExecutionResult): Promise<void> {
     const scheduledTask = task.scheduledTask;
 
-    await this.taskStore.updateExecutionStatus(scheduledTask.id, result.status, result.error);
+    await this.taskStore.updateExecutionStatus(scheduledTask.id, result.status, result.error, {
+      lastRunId: result.runId,
+      lastResultSummary: result.resultSummary,
+      lastArtifactsCount: result.artifactsCount,
+    });
 
     if (scheduledTask.schedule.type === 'one-time') {
       await this.taskStore.update(scheduledTask.id, { enabled: false });

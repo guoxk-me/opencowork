@@ -4,7 +4,8 @@ import { useTranslation } from '../i18n/useTranslation';
 
 export function ChatInput() {
   const [input, setInput] = useState('');
-  const { addMessage, setTask, task, updateTaskStatus } = useTaskStore();
+  const { addMessage, setTask, task, updateTaskStatus, setCurrentRun, setCurrentResult } =
+    useTaskStore();
   const { t } = useTranslation();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -15,6 +16,8 @@ export function ChatInput() {
     const taskDescription = input.trim();
     const continuationThreadId = task?.id || undefined;
     const taskId = continuationThreadId || `task-${Date.now()}`;
+
+    setCurrentResult(null);
 
     // Add user message
     addMessage({ role: 'user', content: taskDescription });
@@ -49,8 +52,9 @@ export function ChatInput() {
       });
       console.log('[Renderer] IPC result:', result);
       const payload = result?.data || result;
-      if (result?.success && payload?.success !== false) {
-        const handleId = payload?.handle || taskId;
+      if (result?.success && payload?.accepted) {
+        const handleId = payload?.run?.id || payload?.handle || taskId;
+        setCurrentRun(handleId, payload?.run?.source || 'chat', payload?.run?.templateId || null);
         setTask({
           id: handleId,
           status: 'executing',

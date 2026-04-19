@@ -2,11 +2,32 @@ import React, { useEffect, useState } from 'react';
 import { useHistoryStore } from '../stores/historyStore';
 import { TaskHistoryRecord } from '../../history/taskHistory';
 import { useTranslation } from '../i18n/useTranslation';
+import { useTaskStore } from '../stores/taskStore';
+import RelationBadge from './RelationBadge';
+
+function getResultSummary(task: TaskHistoryRecord): string | undefined {
+  return task.result?.summary || (typeof task.result?.output === 'string' ? task.result.output : undefined);
+}
+
+function getSourceLabel(task: TaskHistoryRecord): string | undefined {
+  const source = task.metadata?.source;
+  return typeof source === 'string' ? source : undefined;
+}
+
+function getArtifactCount(task: TaskHistoryRecord): number {
+  if (Array.isArray(task.result?.artifacts)) {
+    return task.result.artifacts.length;
+  }
+  const count = task.metadata?.artifactsCount;
+  return typeof count === 'number' ? count : 0;
+}
 
 type FilterTab = 'all' | 'completed' | 'failed' | 'cancelled';
+type OutcomeFilter = 'all' | 'result' | 'artifacts' | 'run' | 'template';
 
 export function HistoryPanel() {
   const { t } = useTranslation();
+  const { openRunsPanel } = useTaskStore();
   const {
     isOpen,
     isLoading,
@@ -23,6 +44,8 @@ export function HistoryPanel() {
     loadTasks,
     deleteTask,
     replayTask,
+    saveTaskAsTemplate,
+    runTemplate,
     searchTasks,
     summarizeSearch,
     clearSelectedTask,
@@ -30,6 +53,8 @@ export function HistoryPanel() {
 
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'chat' | 'scheduler' | 'im' | 'mcp' | 'replay'>('all');
+  const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all');
 
   useEffect(() => {
     if (isOpen) {
@@ -62,6 +87,24 @@ export function HistoryPanel() {
   const displayedTasks = searchKeyword.trim()
     ? tasks.filter((task) => searchResults.some((result) => result.sessionId === task.id))
     : tasks;
+
+  const sourceFilteredTasks = displayedTasks.filter((task) => {
+    const source = getSourceLabel(task);
+    const hasResult = Boolean(getResultSummary(task) || task.result?.structuredData || task.result?.output);
+    const hasArtifacts = getArtifactCount(task) > 0;
+    const hasRun = typeof task.metadata?.runId === 'string';
+    const hasTemplate = typeof task.metadata?.templateId === 'string';
+
+    const matchesSource = sourceFilter === 'all' || source === sourceFilter;
+    const matchesOutcome =
+      outcomeFilter === 'all' ||
+      (outcomeFilter === 'result' && hasResult) ||
+      (outcomeFilter === 'artifacts' && hasArtifacts) ||
+      (outcomeFilter === 'run' && hasRun) ||
+      (outcomeFilter === 'template' && hasTemplate);
+
+    return matchesSource && matchesOutcome;
+  });
 
   const handleTabChange = (tab: FilterTab) => {
     setActiveTab(tab);
@@ -153,6 +196,33 @@ export function HistoryPanel() {
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
+            <select
+              value={sourceFilter}
+              onChange={(e) =>
+                setSourceFilter(
+                  e.target.value as 'all' | 'chat' | 'scheduler' | 'im' | 'mcp' | 'replay'
+                )
+              }
+              className="rounded border border-border bg-background px-2 py-1 text-sm text-white"
+            >
+              <option value="all">All sources</option>
+              <option value="chat">chat</option>
+              <option value="scheduler">scheduler</option>
+              <option value="im">im</option>
+              <option value="mcp">mcp</option>
+              <option value="replay">replay</option>
+            </select>
+            <select
+              value={outcomeFilter}
+              onChange={(e) => setOutcomeFilter(e.target.value as OutcomeFilter)}
+              className="rounded border border-border bg-background px-2 py-1 text-sm text-white"
+            >
+              <option value="all">All outcomes</option>
+              <option value="result">has result</option>
+              <option value="artifacts">has artifacts</option>
+              <option value="run">has run</option>
+              <option value="template">has template</option>
+            </select>
             <input
               type="text"
               placeholder={t('historyPanel.search')}
@@ -171,6 +241,20 @@ export function HistoryPanel() {
             >
               {t('historyPanel.summarize')}
             </button>
+            {(sourceFilter !== 'all' || outcomeFilter !== 'all' || searchKeyword.trim()) && (
+              <button
+                onClick={() => {
+                  setSourceFilter('all');
+                  setOutcomeFilter('all');
+                  setSearchKeyword('');
+                  setActiveTab('all');
+                  setFilter({});
+                }}
+                className="btn btn-secondary text-sm"
+              >
+                Reset
+              </button>
+            )}
           </div>
         </div>
 
@@ -187,17 +271,17 @@ export function HistoryPanel() {
         <div className="flex-1 flex overflow-hidden">
           {/* Task List */}
           <div className="w-96 border-r border-border overflow-y-auto">
-            {isLoading && displayedTasks.length === 0 ? (
+            {isLoading && sourceFilteredTasks.length === 0 ? (
               <div className="flex items-center justify-center h-32 text-text-muted">
                 {t('historyPanel.loading')}
               </div>
-            ) : displayedTasks.length === 0 ? (
+            ) : sourceFilteredTasks.length === 0 ? (
               <div className="flex items-center justify-center h-32 text-text-muted">
                 {t('historyPanel.noHistory')}
               </div>
             ) : (
               <div className="p-2 space-y-1">
-                {displayedTasks.map((task) => {
+                {sourceFilteredTasks.map((task) => {
                   const searchResult = searchResults.find((result) => result.sessionId === task.id);
                   return (
                     <div
@@ -212,6 +296,31 @@ export function HistoryPanel() {
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-white truncate">{task.task}</div>
+                          {getResultSummary(task) && (
+                            <div className="text-xs text-text-secondary mt-1 line-clamp-2">
+                              {getResultSummary(task)}
+                            </div>
+                          )}
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {typeof task.metadata?.runId === 'string' && (
+                              <RelationBadge
+                                label="run"
+                                value={task.metadata.runId}
+                                tone="primary"
+                                onClick={() => openRunsPanel(task.metadata?.runId as string)}
+                              />
+                            )}
+                            {typeof task.metadata?.templateId === 'string' && (
+                              <RelationBadge label="template" value={task.metadata.templateId} />
+                            )}
+                            {getSourceLabel(task) && (
+                              <RelationBadge
+                                label="source"
+                                value={getSourceLabel(task) as string}
+                                tone="muted"
+                              />
+                            )}
+                          </div>
                           <div className="text-xs text-text-muted mt-1">
                             {formatTime(task.startTime)}
                           </div>
@@ -229,6 +338,10 @@ export function HistoryPanel() {
                           {t('historyPanel.duration')}: {formatDuration(task.duration)}
                         </div>
                       )}
+                      <div className="text-xs text-text-muted mt-1 flex gap-3">
+                        {getSourceLabel(task) && <span>source: {getSourceLabel(task)}</span>}
+                        {getArtifactCount(task) > 0 && <span>artifacts: {getArtifactCount(task)}</span>}
+                      </div>
                       {searchResult?.match && searchKeyword.trim() && (
                         <div className="text-xs text-text-muted mt-1 line-clamp-2">
                           {searchResult.match}
@@ -247,6 +360,40 @@ export function HistoryPanel() {
               <>
                 <div className="flex-1 overflow-y-auto p-4">
                   <div className="space-y-4">
+                    {(getResultSummary(selectedTask) || getArtifactCount(selectedTask) > 0) && (
+                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                        <div className="text-xs uppercase tracking-wide text-text-muted mb-2">
+                          Result Overview
+                        </div>
+                        {getResultSummary(selectedTask) && (
+                          <div className="text-sm text-white whitespace-pre-wrap">
+                            {getResultSummary(selectedTask)}
+                          </div>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-text-muted">
+                          <span>artifacts: {getArtifactCount(selectedTask)}</span>
+                          {typeof selectedTask.metadata?.runId === 'string' && (
+                            <RelationBadge
+                              label="run"
+                              value={selectedTask.metadata.runId}
+                              tone="primary"
+                              onClick={() => openRunsPanel(selectedTask.metadata?.runId as string)}
+                            />
+                          )}
+                          {typeof selectedTask.metadata?.templateId === 'string' && (
+                            <RelationBadge label="template" value={selectedTask.metadata.templateId} />
+                          )}
+                          {getSourceLabel(selectedTask) && (
+                            <RelationBadge
+                              label="source"
+                              value={getSourceLabel(selectedTask) as string}
+                              tone="muted"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div>
                       <h3 className="text-sm font-medium text-text-muted mb-1">
                         {t('historyPanel.taskDescription')}
@@ -296,6 +443,38 @@ export function HistoryPanel() {
                       </div>
                     </div>
 
+                    {(getSourceLabel(selectedTask) || getArtifactCount(selectedTask) > 0) && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <h3 className="text-sm font-medium text-text-muted mb-1">Source</h3>
+                          <span className="text-sm text-white">
+                            {getSourceLabel(selectedTask) || 'unknown'}
+                          </span>
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-medium text-text-muted mb-1">Artifacts</h3>
+                          <span className="text-sm text-white">{getArtifactCount(selectedTask)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      {typeof selectedTask.metadata?.runId === 'string' && (
+                        <RelationBadge
+                          label="run"
+                          value={selectedTask.metadata.runId}
+                          tone="primary"
+                          onClick={() => openRunsPanel(selectedTask.metadata?.runId as string)}
+                        />
+                      )}
+                      {typeof selectedTask.metadata?.templateId === 'string' && (
+                        <RelationBadge label="template" value={selectedTask.metadata.templateId} />
+                      )}
+                      {getSourceLabel(selectedTask) && (
+                        <RelationBadge label="source" value={getSourceLabel(selectedTask) as string} tone="muted" />
+                      )}
+                    </div>
+
                     {selectedTask.result && (
                       <div>
                         <h3 className="text-sm font-medium text-text-muted mb-1">
@@ -310,6 +489,20 @@ export function HistoryPanel() {
                             {selectedTask.result.error || t('historyPanel.executionFailed')}
                           </div>
                         )}
+                        {Array.isArray(selectedTask.result.artifacts) &&
+                          selectedTask.result.artifacts.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {selectedTask.result.artifacts.map((artifact) => (
+                                <div
+                                  key={artifact.id}
+                                  className="text-xs text-text-secondary bg-background rounded px-2 py-1"
+                                >
+                                  {artifact.type}: {artifact.name}
+                                  {artifact.uri ? ` (${artifact.uri})` : ''}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                       </div>
                     )}
 
@@ -374,6 +567,28 @@ export function HistoryPanel() {
                     {t('historyPanel.delete')}
                   </button>
                   <div className="flex gap-2">
+                    {typeof selectedTask.metadata?.runId === 'string' && (
+                      <button
+                        onClick={() => openRunsPanel(selectedTask.metadata?.runId as string)}
+                        className="btn btn-secondary text-sm"
+                      >
+                        View Run
+                      </button>
+                    )}
+                    <button
+                      onClick={() => saveTaskAsTemplate(selectedTask.id)}
+                      className="btn btn-secondary text-sm"
+                    >
+                      Save Template
+                    </button>
+                    {typeof selectedTask.metadata?.templateId === 'string' && (
+                      <button
+                        onClick={() => runTemplate(selectedTask.metadata?.templateId as string)}
+                        className="btn btn-secondary text-sm"
+                      >
+                        Run Template
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         clearSelectedTask();
