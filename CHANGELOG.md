@@ -6,13 +6,33 @@ All notable changes to OpenCowork are documented in this file.
 
 ### Focus
 
-The next work stream builds on `v0.12.3` with more result-driven desktop workflows, stronger IM delivery quality, and broader product hardening.
+The next work stream builds on `v0.12.4` with more result-driven desktop workflows, stronger IM delivery quality, and broader product hardening.
 
 ### Highlights
 
 - Extended the IM workflow so Feishu can receive files from users and send generated result files back.
 - Added real image analysis and OCR execution instead of placeholder vision responses.
 - Clarified local-only configuration handling so sensitive IM config files stay out of Git history.
+
+## v0.12.4 - 2026-04-21
+
+### Release focus
+
+Fix Feishu IM reply routing so each task always returns to the originating chat, whether it starts in a private chat or a group thread.
+
+### Fixes
+
+- Fixed task completion and failure replies so private-chat tasks stay in private chat and group-chat tasks reply to the original group thread.
+- Fixed progress notifications so they follow the original task conversation instead of falling back to a private IM notification channel.
+- Added regression coverage for private-chat and group-chat reply routing.
+
+### Security and config notes
+
+- Runtime Feishu credentials remain local-only under `config/`, which is git-ignored and must not be published to GitHub.
+
+### Notes
+
+- `v0.12.4` is the recommended release tag for the current IM reply-routing fix.
 
 ## v0.12.3 - 2026-04-21
 

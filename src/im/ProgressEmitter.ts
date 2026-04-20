@@ -3,17 +3,24 @@ import { IMBot, ProgressEvent, IMNotification } from './types';
 
 type ProgressListener = (data: ProgressEvent) => void;
 
+interface TaskBinding {
+  userId: string;
+  conversationId: string;
+  chatType?: string;
+  replyTargetId?: string;
+}
+
 export class ProgressEmitter extends EventEmitter {
   private progressListeners: Map<string, Set<ProgressListener>> = new Map();
   private imBot: IMBot | null = null;
-  private userBindingMap: Map<string, string> = new Map();
+  private taskBindingMap: Map<string, TaskBinding> = new Map();
 
   setIMBot(bot: IMBot): void {
     this.imBot = bot;
   }
 
-  setUserBinding(taskId: string, userId: string): void {
-    this.userBindingMap.set(taskId, userId);
+  setUserBinding(taskId: string, binding: TaskBinding): void {
+    this.taskBindingMap.set(taskId, binding);
   }
 
   subscribe(taskId: string, listener: ProgressListener): () => void {
@@ -26,7 +33,7 @@ export class ProgressEmitter extends EventEmitter {
       this.progressListeners.get(taskId)?.delete(listener);
       if (this.progressListeners.get(taskId)?.size === 0) {
         this.progressListeners.delete(taskId);
-        this.userBindingMap.delete(taskId);
+        this.taskBindingMap.delete(taskId);
       }
     };
   }
@@ -63,25 +70,29 @@ export class ProgressEmitter extends EventEmitter {
       },
     };
 
-    const userId = this.userBindingMap.get(event.taskId);
-    if (userId) {
+    const binding = this.taskBindingMap.get(event.taskId);
+    if (binding) {
       try {
-        await this.imBot.pushNotification(userId, notification);
-        console.log('[ProgressEmitter] Notification pushed for task:', event.taskId);
+        await this.imBot.sendMessage(
+          binding.replyTargetId || binding.conversationId,
+          `📋 ${notification.title}\n\n${notification.content}`,
+          binding.chatType
+        );
+        console.log('[ProgressEmitter] Notification sent for task:', event.taskId);
       } catch (error) {
-        console.error('[ProgressEmitter] Push notification failed:', error);
+        console.error('[ProgressEmitter] Send message failed:', error);
       }
     }
   }
 
   clearTask(taskId: string): void {
     this.progressListeners.delete(taskId);
-    this.userBindingMap.delete(taskId);
+    this.taskBindingMap.delete(taskId);
   }
 
   clearAll(): void {
     this.progressListeners.clear();
-    this.userBindingMap.clear();
+    this.taskBindingMap.clear();
   }
 }
 

@@ -150,6 +150,12 @@ describe('DispatchService', () => {
 
     await service.handleMessage(message);
 
+    expect(bot.pushNotification).not.toHaveBeenCalled();
+    expect(bot.sendMessage).toHaveBeenCalledWith(
+      'chat-2',
+      expect.stringContaining('✅ 任务执行完成'),
+      'p2p'
+    );
     expect(bot.sendAttachment).toHaveBeenCalledWith(
       'chat-2',
       expect.objectContaining({
@@ -163,6 +169,37 @@ describe('DispatchService', () => {
       'chat-2',
       expect.stringContaining('https://example.com/result'),
       'p2p'
+    );
+  });
+
+  it('replies to the originating group thread instead of private chat', async () => {
+    mockAgentRun.mockResolvedValue({
+      success: true,
+      output: 'done',
+      finalMessage: 'done',
+    });
+    mockExecuteRun.mockImplementation(async (_runId: string, runner: () => Promise<unknown>) => runner());
+
+    const service = createDispatchService(bot);
+    const message: IMMessage = {
+      id: 'm3',
+      platform: 'feishu',
+      userId: 'user-3',
+      content: '任务 帮我处理一下',
+      type: 'text',
+      timestamp: Date.now(),
+      conversationId: 'chat-group-1',
+      chatType: 'group',
+      messageId: 'msg-group-1',
+    };
+
+    await service.handleMessage(message);
+
+    expect(bot.pushNotification).not.toHaveBeenCalled();
+    expect(bot.sendMessage).toHaveBeenCalledWith(
+      'msg-group-1',
+      expect.stringContaining('✅ 任务执行完成'),
+      'group'
     );
   });
 });

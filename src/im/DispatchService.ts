@@ -124,7 +124,12 @@ export class DispatchService extends EventEmitter {
     });
 
     const progressEmitter = getProgressEmitter();
-    progressEmitter.setUserBinding(task.id, msg.userId);
+    progressEmitter.setUserBinding(task.id, {
+      userId: msg.userId,
+      conversationId: msg.conversationId,
+      chatType: msg.chatType,
+      replyTargetId: task.replyTargetId,
+    });
 
     await this.bot.sendMessage(
       this.getReplyTargetId(msg),
@@ -261,10 +266,7 @@ export class DispatchService extends EventEmitter {
           message: 'Agent not initialized',
           resultSummary: 'Agent 未初始化',
         });
-        await this.bot.pushNotification(task.userId, {
-          title: '❌ 任务执行失败',
-          content: 'Agent 未初始化',
-        });
+        await this.sendTaskResponse(task, '❌ 任务执行失败', 'Agent 未初始化');
         return;
       }
 
@@ -303,10 +305,11 @@ export class DispatchService extends EventEmitter {
           artifactsCount: taskResult.artifacts.length,
           runId: task.id,
         });
-        await this.bot.pushNotification(task.userId, {
-          title: '✅ 任务执行完成',
-          content: taskResult.summary || '任务已完成',
-        });
+        await this.sendTaskResponse(
+          task,
+          '✅ 任务执行完成',
+          taskResult.summary || '任务已完成'
+        );
         await this.sendTaskArtifacts(task, taskResult);
       } else {
         this.updateTaskStatus(task.id, {
@@ -317,10 +320,11 @@ export class DispatchService extends EventEmitter {
           artifactsCount: taskResult.artifacts.length,
           runId: task.id,
         });
-        await this.bot.pushNotification(task.userId, {
-          title: '❌ 任务执行失败',
-          content: taskResult.error.message || '未知错误',
-        });
+        await this.sendTaskResponse(
+          task,
+          '❌ 任务执行失败',
+          taskResult.error.message || '未知错误'
+        );
       }
     } catch (error) {
       console.error('[DispatchService] Forward to desktop failed:', error);
@@ -331,10 +335,7 @@ export class DispatchService extends EventEmitter {
         artifactsCount: 0,
         runId: task.id,
       });
-      await this.bot.pushNotification(task.userId, {
-        title: '❌ 任务执行失败',
-        content: String(error),
-      });
+      await this.sendTaskResponse(task, '❌ 任务执行失败', String(error));
     }
   }
 
@@ -585,6 +586,13 @@ export class DispatchService extends EventEmitter {
         );
       }
     }
+  }
+
+  private async sendTaskResponse(task: DispatchTask, title: string, content: string): Promise<void> {
+    const conversationId = task.replyTargetId || task.conversationId;
+    const chatType = task.chatType || 'p2p';
+
+    await this.bot.sendMessage(conversationId, `${title}\n\n${content}`, chatType);
   }
 
   private async buildArtifactAttachment(artifact: TaskArtifact): Promise<IMAttachment | null> {
