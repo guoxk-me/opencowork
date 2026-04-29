@@ -68,6 +68,12 @@ export interface AskUserRequest {
 export interface VisualApprovalRequest {
   runId?: string;
   reason: string;
+  actionRiskReasons?: string[];
+  matchedIntentKeywords?: string[];
+  executionTarget?: {
+    kind: 'browser' | 'desktop' | 'hybrid';
+    environment: 'playwright' | 'vm' | 'container' | 'native-bridge';
+  };
   actions: Array<{
     type: string;
     text?: string;

@@ -22,6 +22,10 @@ describe('buildTaskExecutionMetadata', () => {
         reason: 'visual route',
         explicit: false,
         source: 'chat',
+        executionTarget: {
+          kind: 'browser',
+          environment: 'playwright',
+        },
         visualProviderRequirements: {
           builtInComputerTool: true,
           structuredOutput: true,
@@ -49,6 +53,10 @@ describe('buildTaskExecutionMetadata', () => {
     expect(metadata.taskRouting).toMatchObject({
       executionMode: 'visual',
       reason: 'visual route',
+    });
+    expect(metadata.executionTarget).toMatchObject({
+      kind: 'browser',
+      environment: 'playwright',
     });
     expect(metadata.visualProviderRequirements).toMatchObject({
       builtInComputerTool: true,

@@ -1,8 +1,12 @@
 import { jsx as _jsx } from "react/jsx-runtime";
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const runTemplate = vi.fn();
 const prepareDraftFromTemplate = vi.fn();
+async function loadTemplatePanel() {
+    // @ts-expect-error Explicit TSX import avoids stale JS sidecars.
+    return import('../TemplatePanel.tsx');
+}
 vi.mock('../../stores/historyStore', () => ({
     useHistoryStore: () => ({
         runTemplate,
@@ -21,8 +25,10 @@ vi.mock('../../i18n/useTranslation', () => ({
 describe('TemplatePanel', () => {
     const invoke = vi.fn();
     const writeText = vi.fn().mockResolvedValue(undefined);
+    let workflowPackInstalled = false;
     beforeEach(() => {
         vi.clearAllMocks();
+        workflowPackInstalled = false;
         invoke.mockImplementation((channel) => {
             if (channel === 'template:list') {
                 return Promise.resolve({
@@ -43,6 +49,40 @@ describe('TemplatePanel', () => {
                             createdAt: 1710000000000,
                             updatedAt: 1710000000000,
                         },
+                        ...(workflowPackInstalled
+                            ? [
+                                {
+                                    id: 'workflow-pack-ecommerce-ops-catalog-audit',
+                                    name: 'Catalog Audit Sweep',
+                                    description: 'Audit',
+                                    origin: {
+                                        runId: 'ecommerce-ops:catalog-audit',
+                                        source: 'chat',
+                                        executionMode: 'hybrid',
+                                    },
+                                    inputSchema: { prompt: 'Prompt' },
+                                    defaultInput: { prompt: 'Audit current store backend' },
+                                    executionProfile: 'mixed',
+                                    createdAt: 1710000001000,
+                                    updatedAt: 1710000001000,
+                                },
+                                {
+                                    id: 'workflow-pack-ecommerce-ops-campaign-qa',
+                                    name: 'Promotion Campaign QA',
+                                    description: 'Validate',
+                                    origin: {
+                                        runId: 'ecommerce-ops:campaign-qa',
+                                        source: 'chat',
+                                        executionMode: 'hybrid',
+                                    },
+                                    inputSchema: { prompt: 'Prompt' },
+                                    defaultInput: { prompt: 'Review the active promotion workflow' },
+                                    executionProfile: 'mixed',
+                                    createdAt: 1710000001000,
+                                    updatedAt: 1710000001000,
+                                },
+                            ]
+                            : []),
                     ],
                 });
             }
@@ -56,7 +96,7 @@ describe('TemplatePanel', () => {
                             category: 'browser-heavy',
                             description: 'Pack',
                             summary: 'Catalog and campaign workflows',
-                            outcomes: ['A'],
+                            outcomes: ['Catalog audit notes'],
                             recommendedSkills: ['browser-search'],
                             templates: [
                                 {
@@ -68,10 +108,29 @@ describe('TemplatePanel', () => {
                                 },
                             ],
                         },
+                        {
+                            id: 'saas-admin',
+                            name: 'SaaS Admin Ops',
+                            category: 'browser-heavy',
+                            description: 'Pack',
+                            summary: 'Admin console workflows',
+                            outcomes: ['Tenant health summary'],
+                            recommendedSkills: ['browser-search'],
+                            templates: [
+                                {
+                                    id: 'tenant-health-check',
+                                    name: 'Tenant Health Check',
+                                    description: 'Audit',
+                                    prompt: 'Inspect the current SaaS admin console',
+                                    executionProfile: 'browser-first',
+                                },
+                            ],
+                        },
                     ],
                 });
             }
             if (channel === 'workflow-pack:install') {
+                workflowPackInstalled = true;
                 return Promise.resolve({
                     success: true,
                     data: {
@@ -101,7 +160,7 @@ describe('TemplatePanel', () => {
         });
     });
     it('defaults mixed templates to hybrid mode when running', async () => {
-        const { TemplatePanel } = await import('../TemplatePanel');
+        const { TemplatePanel } = await loadTemplatePanel();
         render(_jsx(TemplatePanel, { isOpen: true, onClose: vi.fn() }));
         await waitFor(() => {
             expect(screen.getByText('Visual Template')).toBeInTheDocument();
@@ -119,7 +178,7 @@ describe('TemplatePanel', () => {
         }, 'hybrid');
     });
     it('refreshes templates when a template changes', async () => {
-        const { TemplatePanel } = await import('../TemplatePanel');
+        const { TemplatePanel } = await loadTemplatePanel();
         render(_jsx(TemplatePanel, { isOpen: true, onClose: vi.fn() }));
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith('template:list');
@@ -132,7 +191,7 @@ describe('TemplatePanel', () => {
         });
     });
     it('copies the template id from the details panel', async () => {
-        const { TemplatePanel } = await import('../TemplatePanel');
+        const { TemplatePanel } = await loadTemplatePanel();
         render(_jsx(TemplatePanel, { isOpen: true, onClose: vi.fn() }));
         await waitFor(() => {
             expect(screen.getByText('Visual Template')).toBeInTheDocument();
@@ -141,15 +200,67 @@ describe('TemplatePanel', () => {
         expect(writeText).toHaveBeenCalledWith('template-1');
     });
     it('lists workflow packs and installs one into templates', async () => {
-        const { TemplatePanel } = await import('../TemplatePanel');
+        const { TemplatePanel } = await loadTemplatePanel();
         render(_jsx(TemplatePanel, { isOpen: true, onClose: vi.fn() }));
         await waitFor(() => {
             expect(screen.getByText('E-commerce Ops')).toBeInTheDocument();
         });
-        fireEvent.click(screen.getByRole('button', { name: 'taskPanels.installPack' }));
+        expect(screen.getByText('Catalog audit notes')).toBeInTheDocument();
+        const ecommercePackCard = screen.getByText('E-commerce Ops').closest('.rounded-xl');
+        expect(ecommercePackCard).not.toBeNull();
+        fireEvent.click(within(ecommercePackCard).getByRole('button', {
+            name: /taskPanels\.(installPack|reinstallPack)/,
+        }));
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith('workflow-pack:install', { packId: 'ecommerce-ops' });
         });
+        expect(screen.getByText('E-commerce Ops: installed 1 templates')).toBeInTheDocument();
         expect(invoke.mock.calls.filter(([channel]) => channel === 'template:list').length).toBeGreaterThanOrEqual(2);
+    });
+    it('filters workflow packs by the shared search box', async () => {
+        const { TemplatePanel } = await loadTemplatePanel();
+        render(_jsx(TemplatePanel, { isOpen: true, onClose: vi.fn() }));
+        await waitFor(() => {
+            expect(screen.getByText('E-commerce Ops')).toBeInTheDocument();
+        });
+        fireEvent.change(screen.getByPlaceholderText('taskPanels.searchTemplates'), {
+            target: { value: 'zzz' },
+        });
+        expect(screen.queryByText('E-commerce Ops')).not.toBeInTheDocument();
+        expect(screen.getByText('taskPanels.noWorkflowPacksMatch')).toBeInTheDocument();
+    });
+    it('marks workflow packs as installed after install', async () => {
+        const { TemplatePanel } = await loadTemplatePanel();
+        render(_jsx(TemplatePanel, { isOpen: true, onClose: vi.fn() }));
+        await waitFor(() => {
+            expect(screen.getByText('E-commerce Ops')).toBeInTheDocument();
+        });
+        const ecommercePackCard = screen.getByText('E-commerce Ops').closest('.rounded-xl');
+        expect(ecommercePackCard).not.toBeNull();
+        fireEvent.click(within(ecommercePackCard).getByRole('button', {
+            name: /taskPanels\.(installPack|reinstallPack)/,
+        }));
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'taskPanels.reinstallPack' })).toBeInTheDocument();
+        });
+    });
+    it('filters workflow packs to installed only when requested', async () => {
+        const { TemplatePanel } = await loadTemplatePanel();
+        render(_jsx(TemplatePanel, { isOpen: true, onClose: vi.fn() }));
+        await waitFor(() => {
+            expect(screen.getByText('E-commerce Ops')).toBeInTheDocument();
+            expect(screen.getByText('SaaS Admin Ops')).toBeInTheDocument();
+        });
+        const ecommercePackCard = screen.getByText('E-commerce Ops').closest('.rounded-xl');
+        expect(ecommercePackCard).not.toBeNull();
+        fireEvent.click(within(ecommercePackCard).getByRole('button', {
+            name: /taskPanels\.(installPack|reinstallPack)/,
+        }));
+        await waitFor(() => {
+            expect(screen.getByText('E-commerce Ops: installed 1 templates')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Installed only' }));
+        expect(screen.getByText('E-commerce Ops')).toBeInTheDocument();
+        expect(screen.queryByText('SaaS Admin Ops')).not.toBeInTheDocument();
     });
 });

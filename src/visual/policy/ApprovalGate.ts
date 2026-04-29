@@ -48,7 +48,24 @@ const HIGH_IMPACT_KEYWORDS = [
   '权限',
 ];
 
-const HIGH_IMPACT_ACTION_TYPES = new Set<UIAction['type']>(['drag']);
+const HIGH_IMPACT_ACTION_TYPES = new Set<UIAction['type']>([
+  'drag',
+  'open_application',
+  'focus_window',
+  'open_file',
+  'save_file',
+  'upload_file',
+  'download_file',
+]);
+
+const DESKTOP_WORKFLOW_ACTION_TYPES = new Set<UIAction['type']>([
+  'open_application',
+  'focus_window',
+  'open_file',
+  'save_file',
+  'upload_file',
+  'download_file',
+]);
 
 function normalizeText(value: string | undefined): string {
   return (value || '').trim().toLowerCase();
@@ -73,9 +90,10 @@ export function containsHighImpactIntent(context: VisualTaskContext): string[] {
 
 export function containsHighImpactActions(actions: UIAction[]): string[] {
   const reasons: string[] = [];
+  const hostActions = actions.filter((action) => HIGH_IMPACT_ACTION_TYPES.has(action.type)).map((action) => action.type);
 
-  if (actions.some((action) => HIGH_IMPACT_ACTION_TYPES.has(action.type))) {
-    reasons.push('contains drag action');
+  if (hostActions.length > 0) {
+    reasons.push(`contains high-impact desktop action: ${Array.from(new Set(hostActions)).join(', ')}`);
   }
 
   if (actions.some((action) => action.type === 'keypress' && (action.keys || []).length > 0)) {
@@ -93,10 +111,46 @@ export function containsHighImpactActions(actions: UIAction[]): string[] {
   return reasons;
 }
 
+function containsDesktopWorkflowActions(actions: UIAction[]): string[] {
+  const desktopActions = actions
+    .filter((action) => DESKTOP_WORKFLOW_ACTION_TYPES.has(action.type))
+    .map((action) => action.type);
+
+  if (desktopActions.length === 0) {
+    return [];
+  }
+
+  return [`contains desktop workflow action: ${Array.from(new Set(desktopActions)).join(', ')}`];
+}
+
+function containsDesktopExecutionContext(context: VisualTaskContext): string[] {
+  if (context.executionTarget?.kind !== 'desktop') {
+    return [];
+  }
+
+  const environment = context.executionTarget.environment;
+  switch (environment) {
+    case 'native-bridge':
+      return ['runs on native-bridge host desktop backend'];
+    case 'vm':
+      return ['runs on VM desktop backend'];
+    case 'container':
+      return ['runs on container desktop backend'];
+    default:
+      return ['runs on desktop backend'];
+  }
+}
+
 export function buildApprovalAudit(actions: UIAction[], context: VisualTaskContext): ApprovalAuditSnapshot {
+  const actionRiskReasons = [
+    ...containsHighImpactActions(actions),
+    ...containsDesktopWorkflowActions(actions),
+    ...containsDesktopExecutionContext(context),
+  ];
+
   return {
     matchedIntentKeywords: containsHighImpactIntent(context),
-    actionRiskReasons: containsHighImpactActions(actions),
+    actionRiskReasons: Array.from(new Set(actionRiskReasons)),
     actionTypes: Array.from(new Set(actions.map((action) => action.type))),
   };
 }

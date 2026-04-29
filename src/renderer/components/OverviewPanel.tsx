@@ -5,6 +5,9 @@ import {
   resolveVisualProviderLabel,
   resolveVisualProviderSelection,
 } from '../../core/visual/visualProviderMetadata';
+import { evaluateBenchmarkReleaseGate } from '../../core/benchmark/report';
+import type { BenchmarkReport } from '../../core/benchmark/types';
+import { getNumber, getRecord, getString, isRecord } from '../utils/object';
 
 interface OverviewPanelProps {
   isOpen: boolean;
@@ -115,6 +118,8 @@ interface BenchmarkReportState {
     avgRecoveryAttempts: number;
     avgVerificationFailures: number;
     avgApprovalInterruptions: number;
+    stableBenchmarks: number;
+    flakyBenchmarks: number;
   };
   byBenchmark: Array<{
     benchmarkTaskId: string;
@@ -128,6 +133,12 @@ interface BenchmarkReportState {
     avgRecoveryAttempts: number;
     avgVerificationFailures: number;
     avgApprovalInterruptions: number;
+    recentRunCount: number;
+    recentPassedRuns: number;
+    recentFailedRuns: number;
+    recentTimeoutRuns: number;
+    recentSuccessRate: number;
+    consecutiveSuccessRuns: number;
     executionModes: Record<string, number>;
     adapterModes: Record<string, number>;
     visualProviders: Record<string, number>;
@@ -170,6 +181,22 @@ interface BenchmarkReportState {
   visualProviders: Record<string, number>;
 }
 
+interface BenchmarkGateState {
+  status: 'pass' | 'risk' | 'pending';
+  summary: string;
+  checks: Array<{
+    id: string;
+    label: string;
+    passed: boolean;
+    detail: string;
+  }>;
+  stableBenchmarks: number;
+  flakyBenchmarks: number;
+  totalRuns: number;
+  successRate: number;
+  recentSuccessRateThreshold: number;
+}
+
 interface AcceptanceCheck {
   id: string;
   label: string;
@@ -186,6 +213,7 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
   const [benchmarkSuites, setBenchmarkSuites] = useState<BenchmarkSuiteSummary[]>([]);
   const [benchmarkSuiteRuns, setBenchmarkSuiteRuns] = useState<BenchmarkSuiteRunSummary[]>([]);
   const [benchmarkReport, setBenchmarkReport] = useState<BenchmarkReportState | null>(null);
+  const [benchmarkGate, setBenchmarkGate] = useState<BenchmarkGateState | null>(null);
   const [benchmarkLoadError, setBenchmarkLoadError] = useState<string | null>(null);
   const [benchmarkRunningId, setBenchmarkRunningId] = useState<string | null>(null);
   const [benchmarkSuiteRunningId, setBenchmarkSuiteRunningId] = useState<string | null>(null);
@@ -278,27 +306,14 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
             status: typeof item?.status === 'string' ? item.status : 'unknown',
             startedAt: typeof item?.startedAt === 'number' ? item.startedAt : Date.now(),
             durationMs: typeof item?.durationMs === 'number' ? item.durationMs : undefined,
-            summary:
-              item?.summary && typeof item.summary === 'object'
-                ? {
-                    total:
-                      typeof (item.summary as Record<string, unknown>).total === 'number'
-                        ? ((item.summary as Record<string, unknown>).total as number)
-                        : 0,
-                    passed:
-                      typeof (item.summary as Record<string, unknown>).passed === 'number'
-                        ? ((item.summary as Record<string, unknown>).passed as number)
-                        : 0,
-                    failed:
-                      typeof (item.summary as Record<string, unknown>).failed === 'number'
-                        ? ((item.summary as Record<string, unknown>).failed as number)
-                        : 0,
-                    timeout:
-                      typeof (item.summary as Record<string, unknown>).timeout === 'number'
-                        ? ((item.summary as Record<string, unknown>).timeout as number)
-                        : 0,
-                  }
-                : undefined,
+            summary: isRecord(item.summary)
+              ? {
+                  total: getNumber(item.summary, 'total') || 0,
+                  passed: getNumber(item.summary, 'passed') || 0,
+                  failed: getNumber(item.summary, 'failed') || 0,
+                  timeout: getNumber(item.summary, 'timeout') || 0,
+                }
+              : undefined,
             error: typeof item?.error === 'string' ? item.error : undefined,
           }))
         );
@@ -308,52 +323,60 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
 
       if (reportResult?.success && reportResult.data && typeof reportResult.data === 'object') {
         const report = reportResult.data as Record<string, unknown>;
-        setBenchmarkReport({
-          summary:
-            report.summary && typeof report.summary === 'object'
-              ? {
-                  totalRuns: typeof (report.summary as Record<string, unknown>).totalRuns === 'number' ? ((report.summary as Record<string, unknown>).totalRuns as number) : 0,
-                  passedRuns: typeof (report.summary as Record<string, unknown>).passedRuns === 'number' ? ((report.summary as Record<string, unknown>).passedRuns as number) : 0,
-                  failedRuns: typeof (report.summary as Record<string, unknown>).failedRuns === 'number' ? ((report.summary as Record<string, unknown>).failedRuns as number) : 0,
-                  timeoutRuns: typeof (report.summary as Record<string, unknown>).timeoutRuns === 'number' ? ((report.summary as Record<string, unknown>).timeoutRuns as number) : 0,
-                  successRate: typeof (report.summary as Record<string, unknown>).successRate === 'number' ? ((report.summary as Record<string, unknown>).successRate as number) : 0,
-                  avgDurationMs: typeof (report.summary as Record<string, unknown>).avgDurationMs === 'number' ? ((report.summary as Record<string, unknown>).avgDurationMs as number) : 0,
-                  avgRecoveryAttempts: typeof (report.summary as Record<string, unknown>).avgRecoveryAttempts === 'number' ? ((report.summary as Record<string, unknown>).avgRecoveryAttempts as number) : 0,
-                  avgVerificationFailures: typeof (report.summary as Record<string, unknown>).avgVerificationFailures === 'number' ? ((report.summary as Record<string, unknown>).avgVerificationFailures as number) : 0,
-                  avgApprovalInterruptions: typeof (report.summary as Record<string, unknown>).avgApprovalInterruptions === 'number' ? ((report.summary as Record<string, unknown>).avgApprovalInterruptions as number) : 0,
-                }
-              : {
-                  totalRuns: 0,
-                  passedRuns: 0,
-                  failedRuns: 0,
-                  timeoutRuns: 0,
-                  successRate: 0,
-                  avgDurationMs: 0,
-                  avgRecoveryAttempts: 0,
-                  avgVerificationFailures: 0,
-                  avgApprovalInterruptions: 0,
-                },
+        const nextBenchmarkReport: BenchmarkReportState = {
+          summary: isRecord(report.summary)
+            ? {
+                totalRuns: getNumber(report.summary, 'totalRuns') || 0,
+                passedRuns: getNumber(report.summary, 'passedRuns') || 0,
+                failedRuns: getNumber(report.summary, 'failedRuns') || 0,
+                timeoutRuns: getNumber(report.summary, 'timeoutRuns') || 0,
+                successRate: getNumber(report.summary, 'successRate') || 0,
+                avgDurationMs: getNumber(report.summary, 'avgDurationMs') || 0,
+                avgRecoveryAttempts: getNumber(report.summary, 'avgRecoveryAttempts') || 0,
+                avgVerificationFailures: getNumber(report.summary, 'avgVerificationFailures') || 0,
+                avgApprovalInterruptions: getNumber(report.summary, 'avgApprovalInterruptions') || 0,
+                stableBenchmarks: getNumber(report.summary, 'stableBenchmarks') || 0,
+                flakyBenchmarks: getNumber(report.summary, 'flakyBenchmarks') || 0,
+              }
+            : {
+                totalRuns: 0,
+                passedRuns: 0,
+                failedRuns: 0,
+                timeoutRuns: 0,
+                successRate: 0,
+                avgDurationMs: 0,
+                avgRecoveryAttempts: 0,
+                avgVerificationFailures: 0,
+                avgApprovalInterruptions: 0,
+                stableBenchmarks: 0,
+                flakyBenchmarks: 0,
+              },
           byBenchmark: Array.isArray(report.byBenchmark)
-            ? (report.byBenchmark as Array<Record<string, unknown>>).map((entry) => ({
-                benchmarkTaskId: typeof entry.benchmarkTaskId === 'string' ? entry.benchmarkTaskId : 'unknown',
-                benchmarkTaskName: typeof entry.benchmarkTaskName === 'string' ? entry.benchmarkTaskName : 'Unnamed benchmark',
-                totalRuns: typeof entry.totalRuns === 'number' ? entry.totalRuns : 0,
-                passedRuns: typeof entry.passedRuns === 'number' ? entry.passedRuns : 0,
-                failedRuns: typeof entry.failedRuns === 'number' ? entry.failedRuns : 0,
-                timeoutRuns: typeof entry.timeoutRuns === 'number' ? entry.timeoutRuns : 0,
-                successRate: typeof entry.successRate === 'number' ? entry.successRate : 0,
-                avgDurationMs: typeof entry.avgDurationMs === 'number' ? entry.avgDurationMs : 0,
-                avgRecoveryAttempts: typeof entry.avgRecoveryAttempts === 'number' ? entry.avgRecoveryAttempts : 0,
-                avgVerificationFailures: typeof entry.avgVerificationFailures === 'number' ? entry.avgVerificationFailures : 0,
-                avgApprovalInterruptions: typeof entry.avgApprovalInterruptions === 'number' ? entry.avgApprovalInterruptions : 0,
-                executionModes: entry.executionModes && typeof entry.executionModes === 'object' ? (entry.executionModes as Record<string, number>) : {},
-                adapterModes: entry.adapterModes && typeof entry.adapterModes === 'object' ? (entry.adapterModes as Record<string, number>) : {},
-                visualProviders:
-                  entry.visualProviders && typeof entry.visualProviders === 'object'
-                    ? (entry.visualProviders as Record<string, number>)
-                    : {},
-                latestRunAt: typeof entry.latestRunAt === 'number' ? entry.latestRunAt : undefined,
-              }))
+            ? report.byBenchmark
+                .filter(isRecord)
+                .map((entry) => ({
+                  benchmarkTaskId: getString(entry, 'benchmarkTaskId') || 'unknown',
+                  benchmarkTaskName: getString(entry, 'benchmarkTaskName') || 'Unnamed benchmark',
+                  totalRuns: getNumber(entry, 'totalRuns') || 0,
+                  passedRuns: getNumber(entry, 'passedRuns') || 0,
+                  failedRuns: getNumber(entry, 'failedRuns') || 0,
+                  timeoutRuns: getNumber(entry, 'timeoutRuns') || 0,
+                  successRate: getNumber(entry, 'successRate') || 0,
+                  avgDurationMs: getNumber(entry, 'avgDurationMs') || 0,
+                  avgRecoveryAttempts: getNumber(entry, 'avgRecoveryAttempts') || 0,
+                  avgVerificationFailures: getNumber(entry, 'avgVerificationFailures') || 0,
+                  avgApprovalInterruptions: getNumber(entry, 'avgApprovalInterruptions') || 0,
+                  recentRunCount: getNumber(entry, 'recentRunCount') || 0,
+                  recentPassedRuns: getNumber(entry, 'recentPassedRuns') || 0,
+                  recentFailedRuns: getNumber(entry, 'recentFailedRuns') || 0,
+                  recentTimeoutRuns: getNumber(entry, 'recentTimeoutRuns') || 0,
+                  recentSuccessRate: getNumber(entry, 'recentSuccessRate') || 0,
+                  consecutiveSuccessRuns: getNumber(entry, 'consecutiveSuccessRuns') || 0,
+                  executionModes: isRecord(entry.executionModes) ? (entry.executionModes as Record<string, number>) : {},
+                  adapterModes: isRecord(entry.adapterModes) ? (entry.adapterModes as Record<string, number>) : {},
+                  visualProviders: isRecord(entry.visualProviders) ? (entry.visualProviders as Record<string, number>) : {},
+                  latestRunAt: getNumber(entry, 'latestRunAt'),
+                }))
             : [],
           byExecutionMode: Array.isArray(report.byExecutionMode)
             ? (report.byExecutionMode as Array<Record<string, unknown>>).map((entry) => ({
@@ -434,13 +457,16 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
             report.adapterModes && typeof report.adapterModes === 'object'
               ? (report.adapterModes as Record<string, number>)
               : {},
-          visualProviders:
-            report.visualProviders && typeof report.visualProviders === 'object'
-              ? (report.visualProviders as Record<string, number>)
-              : {},
-        });
+            visualProviders:
+              report.visualProviders && typeof report.visualProviders === 'object'
+                ? (report.visualProviders as Record<string, number>)
+                : {},
+        };
+        setBenchmarkReport(nextBenchmarkReport);
+        setBenchmarkGate(evaluateBenchmarkReleaseGate(nextBenchmarkReport as BenchmarkReport));
       } else {
         setBenchmarkReport(null);
+        setBenchmarkGate(null);
       }
 
       setBenchmarkLoadError(null);
@@ -514,93 +540,63 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
         throw new Error('Benchmark run not found');
       }
 
-      setSelectedBenchmarkRun({
-        id: typeof result.id === 'string' ? result.id : runId,
-        benchmarkTaskId:
-          typeof result.benchmarkTaskId === 'string' ? result.benchmarkTaskId : 'unknown',
-        benchmarkTaskName:
-          typeof result.benchmarkTaskName === 'string' ? result.benchmarkTaskName : undefined,
-        runId: typeof result.runId === 'string' ? result.runId : undefined,
-        status: typeof result.status === 'string' ? result.status : 'unknown',
-        startedAt: typeof result.startedAt === 'number' ? result.startedAt : Date.now(),
-        durationMs: typeof result.durationMs === 'number' ? result.durationMs : undefined,
-        evaluation:
-          result.evaluation && typeof result.evaluation === 'object'
+        const evaluation = getRecord(result, 'evaluation');
+        const taskResult = getRecord(result, 'taskResult');
+        const taskRun = getRecord(result, 'taskRun');
+
+        setSelectedBenchmarkRun({
+          id: getString(result, 'id') || runId,
+          benchmarkTaskId: getString(result, 'benchmarkTaskId') || 'unknown',
+          benchmarkTaskName: getString(result, 'benchmarkTaskName') || undefined,
+          runId: getString(result, 'runId') || undefined,
+          status: getString(result, 'status') || 'unknown',
+          startedAt: getNumber(result, 'startedAt') || Date.now(),
+          durationMs: getNumber(result, 'durationMs'),
+          evaluation: evaluation
             ? {
-                passed: Boolean((result.evaluation as Record<string, unknown>).passed),
-                summary:
-                  typeof (result.evaluation as Record<string, unknown>).summary === 'string'
-                    ? ((result.evaluation as Record<string, unknown>).summary as string)
-                    : '',
-                checks: Array.isArray((result.evaluation as Record<string, unknown>).checks)
-                  ? ((result.evaluation as Record<string, unknown>).checks as Array<Record<string, unknown>>).map((check) => ({
-                      id: typeof check.id === 'string' ? check.id : 'unknown',
-                      label: typeof check.label === 'string' ? check.label : 'check',
-                      passed: Boolean(check.passed),
-                      detail: typeof check.detail === 'string' ? check.detail : undefined,
-                    }))
+                passed: Boolean(evaluation.passed),
+                summary: typeof evaluation.summary === 'string' ? evaluation.summary : '',
+                checks: Array.isArray(evaluation.checks)
+                  ? evaluation.checks
+                      .filter(isRecord)
+                      .map((check) => ({
+                        id: getString(check, 'id') || 'unknown',
+                        label: getString(check, 'label') || 'check',
+                        passed: Boolean(check.passed),
+                        detail: getString(check, 'detail'),
+                      }))
                   : undefined,
               }
             : undefined,
-        error: typeof result.error === 'string' ? result.error : undefined,
-        taskResult:
-          result.taskResult && typeof result.taskResult === 'object'
+          error: getString(result, 'error'),
+          taskResult: taskResult
             ? {
-                id:
-                  typeof (result.taskResult as Record<string, unknown>).id === 'string'
-                    ? ((result.taskResult as Record<string, unknown>).id as string)
-                    : 'unknown',
-                summary:
-                  typeof (result.taskResult as Record<string, unknown>).summary === 'string'
-                    ? ((result.taskResult as Record<string, unknown>).summary as string)
-                    : '',
-                artifacts: Array.isArray((result.taskResult as Record<string, unknown>).artifacts)
-                  ? ((result.taskResult as Record<string, unknown>).artifacts as Array<Record<string, unknown>>).map((artifact) => ({
-                      id: typeof artifact.id === 'string' ? artifact.id : 'unknown',
-                      type: typeof artifact.type === 'string' ? artifact.type : 'text',
-                      name: typeof artifact.name === 'string' ? artifact.name : 'artifact',
-                      uri: typeof artifact.uri === 'string' ? artifact.uri : undefined,
-                      content: typeof artifact.content === 'string' ? artifact.content : undefined,
+                id: getString(taskResult, 'id') || 'unknown',
+                summary: getString(taskResult, 'summary') || '',
+                artifacts: Array.isArray(taskResult.artifacts)
+                  ? taskResult.artifacts.filter(isRecord).map((artifact) => ({
+                      id: getString(artifact, 'id') || 'unknown',
+                      type: getString(artifact, 'type') || 'text',
+                      name: getString(artifact, 'name') || 'artifact',
+                      uri: getString(artifact, 'uri'),
+                      content: getString(artifact, 'content'),
                     }))
                   : undefined,
-                rawOutput: (result.taskResult as Record<string, unknown>).rawOutput,
+                rawOutput: taskResult.rawOutput,
               }
             : undefined,
-        taskRun:
-          result.taskRun && typeof result.taskRun === 'object'
+          taskRun: taskRun
             ? {
-                id:
-                  typeof (result.taskRun as Record<string, unknown>).id === 'string'
-                    ? ((result.taskRun as Record<string, unknown>).id as string)
-                    : runId,
-                status:
-                  typeof (result.taskRun as Record<string, unknown>).status === 'string'
-                    ? ((result.taskRun as Record<string, unknown>).status as string)
-                    : 'unknown',
-                startedAt:
-                  typeof (result.taskRun as Record<string, unknown>).startedAt === 'number'
-                    ? ((result.taskRun as Record<string, unknown>).startedAt as number)
-                    : Date.now(),
-                endedAt:
-                  typeof (result.taskRun as Record<string, unknown>).endedAt === 'number'
-                    ? ((result.taskRun as Record<string, unknown>).endedAt as number)
-                    : undefined,
-                source:
-                  typeof (result.taskRun as Record<string, unknown>).source === 'string'
-                    ? ((result.taskRun as Record<string, unknown>).source as string)
-                    : undefined,
-                title:
-                  typeof (result.taskRun as Record<string, unknown>).title === 'string'
-                    ? ((result.taskRun as Record<string, unknown>).title as string)
-                    : undefined,
-                metadata:
-                  (result.taskRun as Record<string, unknown>).metadata &&
-                  typeof (result.taskRun as Record<string, unknown>).metadata === 'object'
-                    ? ((result.taskRun as Record<string, unknown>).metadata as Record<string, unknown>)
-                    : undefined,
+                id: getString(taskRun, 'id') || runId,
+                status: getString(taskRun, 'status') || 'unknown',
+                startedAt: getNumber(taskRun, 'startedAt') || Date.now(),
+                endedAt: getNumber(taskRun, 'endedAt'),
+                source: getString(taskRun, 'source'),
+                title: getString(taskRun, 'title'),
+                metadata: isRecord(taskRun.metadata) ? (taskRun.metadata as Record<string, unknown>) : undefined,
               }
             : undefined,
-      });
+        });
     } catch (viewError) {
       console.error('[OverviewPanel] benchmark:run:get error:', viewError);
       setSelectedBenchmarkRun(null);
@@ -619,75 +615,55 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
         throw new Error('Benchmark suite run not found');
       }
 
-      setSelectedBenchmarkSuiteRun({
-        id: typeof result.id === 'string' ? result.id : runId,
-        benchmarkTaskSetId:
-          typeof result.benchmarkTaskSetId === 'string' ? result.benchmarkTaskSetId : 'unknown',
-        benchmarkTaskSetName:
-          typeof result.benchmarkTaskSetName === 'string' ? result.benchmarkTaskSetName : 'Unnamed suite',
-        status: typeof result.status === 'string' ? result.status : 'unknown',
-        startedAt: typeof result.startedAt === 'number' ? result.startedAt : Date.now(),
-        durationMs: typeof result.durationMs === 'number' ? result.durationMs : undefined,
-        summary:
-          result.summary && typeof result.summary === 'object'
+        const summary = getRecord(result, 'summary');
+        setSelectedBenchmarkSuiteRun({
+          id: getString(result, 'id') || runId,
+          benchmarkTaskSetId: getString(result, 'benchmarkTaskSetId') || 'unknown',
+          benchmarkTaskSetName: getString(result, 'benchmarkTaskSetName') || 'Unnamed suite',
+          status: getString(result, 'status') || 'unknown',
+          startedAt: getNumber(result, 'startedAt') || Date.now(),
+          durationMs: getNumber(result, 'durationMs'),
+          summary: summary
             ? {
-                total:
-                  typeof (result.summary as Record<string, unknown>).total === 'number'
-                    ? ((result.summary as Record<string, unknown>).total as number)
-                    : 0,
-                passed:
-                  typeof (result.summary as Record<string, unknown>).passed === 'number'
-                    ? ((result.summary as Record<string, unknown>).passed as number)
-                    : 0,
-                failed:
-                  typeof (result.summary as Record<string, unknown>).failed === 'number'
-                    ? ((result.summary as Record<string, unknown>).failed as number)
-                    : 0,
-                timeout:
-                  typeof (result.summary as Record<string, unknown>).timeout === 'number'
-                    ? ((result.summary as Record<string, unknown>).timeout as number)
-                    : 0,
+                total: getNumber(summary, 'total') || 0,
+                passed: getNumber(summary, 'passed') || 0,
+                failed: getNumber(summary, 'failed') || 0,
+                timeout: getNumber(summary, 'timeout') || 0,
               }
             : undefined,
-        benchmarkRunIds: Array.isArray(result.benchmarkRunIds)
-          ? result.benchmarkRunIds.filter((id: unknown): id is string => typeof id === 'string')
-          : undefined,
-        benchmarkRuns: Array.isArray(result.benchmarkRuns)
-          ? result.benchmarkRuns
-              .filter((item: unknown): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-              .map((item: Record<string, unknown>) => ({
-                id: typeof item.id === 'string' ? item.id : 'unknown',
-                benchmarkTaskId:
-                  typeof item.benchmarkTaskId === 'string' ? item.benchmarkTaskId : 'unknown',
-                benchmarkTaskName:
-                  typeof item.benchmarkTaskName === 'string' ? item.benchmarkTaskName : 'Unnamed benchmark',
-                runId: typeof item.runId === 'string' ? item.runId : 'unknown',
-                status: typeof item.status === 'string' ? item.status : 'unknown',
-                startedAt: typeof item.startedAt === 'number' ? item.startedAt : Date.now(),
-                durationMs: typeof item.durationMs === 'number' ? item.durationMs : undefined,
-                evaluation:
-                  item.evaluation && typeof item.evaluation === 'object'
+          benchmarkRunIds: Array.isArray(result.benchmarkRunIds)
+            ? result.benchmarkRunIds.filter((id: unknown): id is string => typeof id === 'string')
+            : undefined,
+          benchmarkRuns: Array.isArray(result.benchmarkRuns)
+            ? result.benchmarkRuns
+                .filter((item: unknown): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+                .map((item: Record<string, unknown>) => ({
+                  id: getString(item, 'id') || 'unknown',
+                  benchmarkTaskId: getString(item, 'benchmarkTaskId') || 'unknown',
+                  benchmarkTaskName: getString(item, 'benchmarkTaskName') || 'Unnamed benchmark',
+                  runId: getString(item, 'runId') || 'unknown',
+                  status: getString(item, 'status') || 'unknown',
+                  startedAt: getNumber(item, 'startedAt') || Date.now(),
+                  durationMs: getNumber(item, 'durationMs'),
+                  evaluation: isRecord(item.evaluation)
                     ? {
-                        passed: Boolean((item.evaluation as Record<string, unknown>).passed),
-                        summary:
-                          typeof (item.evaluation as Record<string, unknown>).summary === 'string'
-                            ? ((item.evaluation as Record<string, unknown>).summary as string)
-                            : '',
-                        checks: Array.isArray((item.evaluation as Record<string, unknown>).checks)
-                          ? ((item.evaluation as Record<string, unknown>).checks as Array<Record<string, unknown>>).map((check) => ({
-                              id: typeof check.id === 'string' ? check.id : 'unknown',
-                              label: typeof check.label === 'string' ? check.label : 'check',
+                        passed: Boolean(item.evaluation.passed),
+                        summary: typeof item.evaluation.summary === 'string' ? item.evaluation.summary : '',
+                        checks: Array.isArray(item.evaluation.checks)
+                          ? item.evaluation.checks.filter(isRecord).map((check) => ({
+                              id: getString(check, 'id') || 'unknown',
+                              label: getString(check, 'label') || 'check',
                               passed: Boolean(check.passed),
-                              detail: typeof check.detail === 'string' ? check.detail : undefined,
+                              detail: getString(check, 'detail'),
                             }))
                           : undefined,
                       }
                     : undefined,
-                error: typeof item.error === 'string' ? item.error : undefined,
-              }))
-          : undefined,
-        error: typeof result.error === 'string' ? result.error : undefined,
-      });
+                  error: getString(item, 'error'),
+                }))
+            : undefined,
+          error: getString(result, 'error'),
+        });
     } catch (viewError) {
       console.error('[OverviewPanel] benchmark:suite-run:get error:', viewError);
       setSelectedBenchmarkSuiteRun(null);
@@ -1289,7 +1265,33 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
                       <MetricCard label="Avg duration" value={formatDuration(benchmarkReport.summary.avgDurationMs)} color="info" />
                       <MetricCard label="Avg recovery" value={benchmarkReport.summary.avgRecoveryAttempts} color="warning" />
                       <MetricCard label="Avg verification failures" value={benchmarkReport.summary.avgVerificationFailures} color="error" />
+                      <MetricCard label="Stable benchmarks" value={benchmarkReport.summary.stableBenchmarks} color="success" />
+                      <MetricCard label="Flaky benchmarks" value={benchmarkReport.summary.flakyBenchmarks} color="warning" />
                     </div>
+                    {benchmarkGate && (
+                      <div className="mt-4 rounded-lg border border-border bg-surface p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-text-muted">Benchmark gate</div>
+                            <div className={`mt-1 text-sm font-medium ${benchmarkGate.status === 'pass' ? 'text-success' : benchmarkGate.status === 'risk' ? 'text-warning' : 'text-text-secondary'}`}>
+                              {benchmarkGate.status.toUpperCase()}
+                            </div>
+                          </div>
+                          <div className="text-xs text-text-muted">
+                            {benchmarkGate.stableBenchmarks} stable / {benchmarkGate.flakyBenchmarks} flaky
+                          </div>
+                        </div>
+                        <div className="mt-2 text-sm text-text-secondary">{benchmarkGate.summary}</div>
+                        <div className="mt-3 grid gap-2 md:grid-cols-2">
+                          {benchmarkGate.checks.slice(0, 4).map((check) => (
+                            <div key={check.id} className="rounded-md bg-background px-3 py-2 text-xs">
+                              <div className={`font-medium ${check.passed ? 'text-success' : 'text-warning'}`}>{check.label}</div>
+                              <div className="mt-1 text-text-muted">{check.detail}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="grid gap-4 md:grid-cols-2 mt-4">
                       <div>
                         <div className="text-xs text-text-muted mb-2">Execution mode distribution</div>
@@ -1482,12 +1484,16 @@ export function OverviewPanel({ isOpen, onClose }: OverviewPanelProps) {
                             <div className="text-xs text-text-muted truncate">
                               {entry.totalRuns} runs · {entry.passedRuns} passed · avg recovery {entry.avgRecoveryAttempts}
                             </div>
+                            <div className="mt-1 text-[11px] text-text-muted">
+                              recent {entry.recentRunCount} runs · {entry.recentSuccessRate}% recent success · {entry.consecutiveSuccessRuns} run streak
+                            </div>
                           </div>
                           <div className="text-right shrink-0">
                             <div className={`text-sm font-medium ${entry.successRate >= 80 ? 'text-success' : entry.successRate >= 50 ? 'text-warning' : 'text-error'}`}>
                               {entry.successRate}%
                             </div>
                             <div className="text-xs text-text-muted">{formatDuration(entry.avgDurationMs)}</div>
+                            <div className="text-[11px] text-text-muted">{entry.recentPassedRuns} recent passed</div>
                           </div>
                         </div>
                       ))}

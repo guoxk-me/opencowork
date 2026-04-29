@@ -11,6 +11,7 @@ export interface StartTaskRequest {
   source: TaskSource;
   threadId?: string;
   executionMode?: 'dom' | 'visual' | 'hybrid';
+  executionTargetKind?: 'browser' | 'desktop' | 'hybrid';
   templateId?: string;
   params?: Record<string, unknown>;
 }
@@ -206,6 +207,7 @@ export class BenchmarkRunService {
       source: options.source || 'scheduler',
       threadId,
       executionMode: options.benchmark.executionConfig?.executionMode,
+      executionTargetKind: options.benchmark.executionConfig?.executionTargetKind,
       params: {
         benchmarkId: options.benchmark.id,
         benchmarkRunId,

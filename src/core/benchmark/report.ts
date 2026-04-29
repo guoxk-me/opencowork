@@ -1,5 +1,7 @@
 import {
   BenchmarkAdapterModeReportEntry,
+  BenchmarkReleaseGate,
+  BenchmarkReleaseGateOptions,
   BenchmarkExecutionModeReportEntry,
   BenchmarkReport,
   BenchmarkReportEntry,
@@ -35,6 +37,7 @@ export function createBenchmarkReport(records: BenchmarkRunRecord[]): BenchmarkR
   const approvalIntentKeywords: Record<string, number> = {};
   const approvalRiskReasons: Record<string, number> = {};
   const byBenchmarkMap = new Map<string, BenchmarkReportEntry>();
+  const byBenchmarkRunsMap = new Map<string, BenchmarkRunRecord[]>();
   const byExecutionModeMap = new Map<string, BenchmarkExecutionModeReportEntry>();
   const byAdapterModeMap = new Map<string, BenchmarkAdapterModeReportEntry>();
 
@@ -151,6 +154,12 @@ export function createBenchmarkReport(records: BenchmarkRunRecord[]): BenchmarkR
       avgRecoveryAttempts: 0,
       avgVerificationFailures: 0,
       avgApprovalInterruptions: 0,
+      recentRunCount: 0,
+      recentPassedRuns: 0,
+      recentFailedRuns: 0,
+      recentTimeoutRuns: 0,
+      recentSuccessRate: 0,
+      consecutiveSuccessRuns: 0,
       executionModes: {},
       adapterModes: {},
       visualProviders: {},
@@ -174,19 +183,61 @@ export function createBenchmarkReport(records: BenchmarkRunRecord[]): BenchmarkR
     incrementCounter(existing.visualProviders, record.visualProvider?.id);
     existing.latestRunAt = Math.max(existing.latestRunAt || 0, record.startedAt || 0);
     byBenchmarkMap.set(record.benchmarkTaskId, existing);
+
+    const benchmarkRuns = byBenchmarkRunsMap.get(record.benchmarkTaskId) || [];
+    benchmarkRuns.push(record);
+    byBenchmarkRunsMap.set(record.benchmarkTaskId, benchmarkRuns);
   }
 
+  let stableBenchmarks = 0;
+  let flakyBenchmarks = 0;
+
   const byBenchmark = Array.from(byBenchmarkMap.values())
-    .map((entry) => ({
-      ...entry,
-      successRate: entry.totalRuns > 0 ? roundToOneDecimal((entry.passedRuns / entry.totalRuns) * 100) : 0,
-      avgDurationMs: entry.totalRuns > 0 ? Math.round(entry.avgDurationMs / entry.totalRuns) : 0,
-      avgRecoveryAttempts: entry.totalRuns > 0 ? roundToOneDecimal(entry.avgRecoveryAttempts / entry.totalRuns) : 0,
-      avgVerificationFailures:
-        entry.totalRuns > 0 ? roundToOneDecimal(entry.avgVerificationFailures / entry.totalRuns) : 0,
-      avgApprovalInterruptions:
-        entry.totalRuns > 0 ? roundToOneDecimal(entry.avgApprovalInterruptions / entry.totalRuns) : 0,
-    }))
+    .map((entry) => {
+      const runs = (byBenchmarkRunsMap.get(entry.benchmarkTaskId) || [])
+        .slice()
+        .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+      const recentRuns = runs.slice(0, 5);
+      let consecutiveSuccessRuns = 0;
+      for (const run of runs) {
+        if (run.status === 'completed' && run.evaluation?.passed) {
+          consecutiveSuccessRuns += 1;
+        } else {
+          break;
+        }
+      }
+
+      const recentPassedRuns = recentRuns.filter((run) => run.status === 'completed' && run.evaluation?.passed).length;
+      const recentFailedRuns = recentRuns.filter(
+        (run) => run.status === 'failed' || (run.status === 'completed' && !run.evaluation?.passed)
+      ).length;
+      const recentTimeoutRuns = recentRuns.filter((run) => run.status === 'timeout').length;
+      const recentRunCount = recentRuns.length;
+      const recentSuccessRate = recentRunCount > 0 ? roundToOneDecimal((recentPassedRuns / recentRunCount) * 100) : 0;
+
+      if (recentRunCount >= 3 && recentSuccessRate >= 80) {
+        stableBenchmarks += 1;
+      } else if (recentRunCount >= 3) {
+        flakyBenchmarks += 1;
+      }
+
+      return {
+        ...entry,
+        recentRunCount,
+        recentPassedRuns,
+        recentFailedRuns,
+        recentTimeoutRuns,
+        recentSuccessRate,
+        consecutiveSuccessRuns,
+        successRate: entry.totalRuns > 0 ? roundToOneDecimal((entry.passedRuns / entry.totalRuns) * 100) : 0,
+        avgDurationMs: entry.totalRuns > 0 ? Math.round(entry.avgDurationMs / entry.totalRuns) : 0,
+        avgRecoveryAttempts: entry.totalRuns > 0 ? roundToOneDecimal(entry.avgRecoveryAttempts / entry.totalRuns) : 0,
+        avgVerificationFailures:
+          entry.totalRuns > 0 ? roundToOneDecimal(entry.avgVerificationFailures / entry.totalRuns) : 0,
+        avgApprovalInterruptions:
+          entry.totalRuns > 0 ? roundToOneDecimal(entry.avgApprovalInterruptions / entry.totalRuns) : 0,
+      };
+    })
     .sort((a, b) => b.totalRuns - a.totalRuns || a.benchmarkTaskName.localeCompare(b.benchmarkTaskName));
 
   const byExecutionMode = Array.from(byExecutionModeMap.values())
@@ -228,6 +279,8 @@ export function createBenchmarkReport(records: BenchmarkRunRecord[]): BenchmarkR
       avgRecoveryAttempts: totalRuns > 0 ? roundToOneDecimal(totalRecoveryAttempts / totalRuns) : 0,
       avgVerificationFailures: totalRuns > 0 ? roundToOneDecimal(totalVerificationFailures / totalRuns) : 0,
       avgApprovalInterruptions: totalRuns > 0 ? roundToOneDecimal(totalApprovalInterruptions / totalRuns) : 0,
+      stableBenchmarks,
+      flakyBenchmarks,
     },
     byBenchmark,
     byExecutionMode,
@@ -243,6 +296,95 @@ export function createBenchmarkReport(records: BenchmarkRunRecord[]): BenchmarkR
     executionModes,
     adapterModes,
     visualProviders,
+  };
+}
+
+export function evaluateBenchmarkReleaseGate(
+  report: BenchmarkReport,
+  options: BenchmarkReleaseGateOptions = {}
+): BenchmarkReleaseGate {
+  const recentSuccessRateThreshold = options.recentSuccessRateThreshold ?? 80;
+  const minimumRunsToJudge = options.minimumRunsToJudge ?? 3;
+  const minimumConsecutiveSuccessRuns = options.minimumConsecutiveSuccessRuns ?? 3;
+  const checks = report.byBenchmark.map((entry) => {
+    const hasEnoughRecentRuns = entry.recentRunCount >= minimumRunsToJudge;
+    const recentSuccessHealthy = entry.recentSuccessRate >= recentSuccessRateThreshold;
+    const noRecentTimeouts = entry.recentTimeoutRuns === 0;
+    const consecutiveSuccessHealthy = entry.consecutiveSuccessRuns >= minimumConsecutiveSuccessRuns;
+    const passed = hasEnoughRecentRuns && recentSuccessHealthy && noRecentTimeouts && consecutiveSuccessHealthy;
+    const detail = passed
+      ? `${entry.recentRunCount} recent runs at ${entry.recentSuccessRate}% success with ${entry.consecutiveSuccessRuns} consecutive successes`
+      : !hasEnoughRecentRuns
+        ? `Only ${entry.recentRunCount} recent runs available; need at least ${minimumRunsToJudge}`
+        : !recentSuccessHealthy
+          ? `Recent success rate is ${entry.recentSuccessRate}%, below ${recentSuccessRateThreshold}%`
+          : !noRecentTimeouts
+            ? `Recent timeout runs remain at ${entry.recentTimeoutRuns}`
+            : `Only ${entry.consecutiveSuccessRuns} consecutive successful run(s); need at least ${minimumConsecutiveSuccessRuns}`;
+
+    return {
+      id: entry.benchmarkTaskId,
+      label: entry.benchmarkTaskName,
+      passed,
+      detail,
+    };
+  });
+
+  const hasNoBenchmarkData = report.summary.totalRuns === 0 || report.byBenchmark.length === 0;
+  const hasFlakyBenchmarks = report.summary.flakyBenchmarks > 0;
+  const hasInsufficientStableCoverage = report.summary.stableBenchmarks === 0 && report.summary.totalRuns > 0;
+  const hasLowOverallSuccess = report.summary.successRate < 80;
+  const hasBenchmarksWithFailures = checks.some((check) => !check.passed);
+
+  if (hasNoBenchmarkData) {
+    return {
+      status: 'pending',
+      summary: 'No benchmark data has been collected yet.',
+      checks,
+      stableBenchmarks: report.summary.stableBenchmarks,
+      flakyBenchmarks: report.summary.flakyBenchmarks,
+      totalRuns: report.summary.totalRuns,
+      successRate: report.summary.successRate,
+      recentSuccessRateThreshold,
+    };
+  }
+
+  if (hasFlakyBenchmarks || hasInsufficientStableCoverage || hasLowOverallSuccess || hasBenchmarksWithFailures) {
+    const reasons: string[] = [];
+    if (hasFlakyBenchmarks) {
+      reasons.push(`${report.summary.flakyBenchmarks} flaky benchmark(s)`);
+    }
+    if (hasInsufficientStableCoverage) {
+      reasons.push('no stable benchmark coverage');
+    }
+    if (hasLowOverallSuccess) {
+      reasons.push(`overall success rate ${report.summary.successRate}%`);
+    }
+    if (hasBenchmarksWithFailures) {
+      reasons.push('one or more benchmarks need more recent successful runs');
+    }
+
+    return {
+      status: 'risk',
+      summary: `Release gate not met: ${reasons.join(', ')}.`,
+      checks,
+      stableBenchmarks: report.summary.stableBenchmarks,
+      flakyBenchmarks: report.summary.flakyBenchmarks,
+      totalRuns: report.summary.totalRuns,
+      successRate: report.summary.successRate,
+      recentSuccessRateThreshold,
+    };
+  }
+
+  return {
+    status: 'pass',
+    summary: `Release gate passed with ${report.summary.stableBenchmarks} stable benchmark(s) and ${report.summary.successRate}% overall success.`,
+    checks,
+    stableBenchmarks: report.summary.stableBenchmarks,
+    flakyBenchmarks: report.summary.flakyBenchmarks,
+    totalRuns: report.summary.totalRuns,
+    successRate: report.summary.successRate,
+    recentSuccessRateThreshold,
   };
 }
 
@@ -263,6 +405,12 @@ export function serializeBenchmarkReportCsv(report: BenchmarkReport): string {
     'avgRecoveryAttempts',
     'avgVerificationFailures',
     'avgApprovalInterruptions',
+    'recentRunCount',
+    'recentPassedRuns',
+    'recentFailedRuns',
+    'recentTimeoutRuns',
+    'recentSuccessRate',
+    'consecutiveSuccessRuns',
     'executionModes',
     'adapterModes',
     'visualProviders',
@@ -281,6 +429,12 @@ export function serializeBenchmarkReportCsv(report: BenchmarkReport): string {
     entry.avgRecoveryAttempts,
     entry.avgVerificationFailures,
     entry.avgApprovalInterruptions,
+    entry.recentRunCount,
+    entry.recentPassedRuns,
+    entry.recentFailedRuns,
+    entry.recentTimeoutRuns,
+    entry.recentSuccessRate,
+    entry.consecutiveSuccessRuns,
     JSON.stringify(entry.executionModes),
     JSON.stringify(entry.adapterModes),
     JSON.stringify(entry.visualProviders),

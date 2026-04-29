@@ -27,6 +27,7 @@ export interface BenchmarkTaskInitialState {
 
 export interface BenchmarkTaskExecutionConfig {
   executionMode?: TaskExecutionMode;
+  executionTargetKind?: 'browser' | 'desktop' | 'hybrid';
   maxTurns?: number;
   adapterMode?: BenchmarkAdapterMode;
 }
@@ -145,6 +146,12 @@ export interface BenchmarkReportEntry {
   avgRecoveryAttempts: number;
   avgVerificationFailures: number;
   avgApprovalInterruptions: number;
+  recentRunCount: number;
+  recentPassedRuns: number;
+  recentFailedRuns: number;
+  recentTimeoutRuns: number;
+  recentSuccessRate: number;
+  consecutiveSuccessRuns: number;
   executionModes: Record<string, number>;
   adapterModes: Record<string, number>;
   visualProviders: Record<string, number>;
@@ -188,6 +195,8 @@ export interface BenchmarkReport {
     avgRecoveryAttempts: number;
     avgVerificationFailures: number;
     avgApprovalInterruptions: number;
+    stableBenchmarks: number;
+    flakyBenchmarks: number;
   };
   byBenchmark: BenchmarkReportEntry[];
   byExecutionMode: BenchmarkExecutionModeReportEntry[];
@@ -203,6 +212,32 @@ export interface BenchmarkReport {
   executionModes: Record<string, number>;
   adapterModes: Record<string, number>;
   visualProviders: Record<string, number>;
+}
+
+export type BenchmarkReleaseGateStatus = 'pass' | 'risk' | 'pending';
+
+export interface BenchmarkReleaseGateCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface BenchmarkReleaseGateOptions {
+  recentSuccessRateThreshold?: number;
+  minimumRunsToJudge?: number;
+  minimumConsecutiveSuccessRuns?: number;
+}
+
+export interface BenchmarkReleaseGate {
+  status: BenchmarkReleaseGateStatus;
+  summary: string;
+  checks: BenchmarkReleaseGateCheck[];
+  stableBenchmarks: number;
+  flakyBenchmarks: number;
+  totalRuns: number;
+  successRate: number;
+  recentSuccessRateThreshold: number;
 }
 
 export interface BenchmarkTaskRunResult {

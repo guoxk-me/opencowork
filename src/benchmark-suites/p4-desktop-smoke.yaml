@@ -1,0 +1,20 @@
+id: suite-p4-desktop-smoke
+name: P4 Desktop Smoke Suite
+description: Minimal suite covering the desktop execution target, browser-desktop handoff, and approval recovery.
+benchmarkIds:
+  - benchmark-desktop-notes-smoke
+  - benchmark-desktop-vm-notes-smoke
+  - benchmark-desktop-browser-handoff
+  - benchmark-desktop-browser-reference-note
+  - benchmark-desktop-approval-recovery
+  - benchmark-desktop-browser-finish
+  - benchmark-desktop-focus-recovery
+  - benchmark-desktop-file-dialog-recovery
+  - benchmark-desktop-upload-recovery
+  - benchmark-desktop-download-rename-upload
+tags:
+  - desktop
+  - p4
+  - smoke
+createdAt: 1710000000000
+updatedAt: 1710000000000

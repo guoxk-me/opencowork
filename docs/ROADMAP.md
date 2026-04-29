@@ -44,6 +44,14 @@ The current codebase is entering an architectural convergence phase:
 - overview metrics panel restored and guarded against partial payloads,
 - broader i18n coverage for template, runs, result, history, and IM task surfaces,
 - regression coverage for template validation, result persistence, run-to-template conversion, IM run links, result-first history rendering, IM attachments, and vision execution.
+- P4 desktop smoke suite and mixed benchmark coverage for desktop notes, browser handoff, browser reference capture, and desktop approval recovery.
+- Added a browser-first desktop finish benchmark to better cover browser-to-desktop workflow handoff.
+- Added a desktop focus recovery benchmark to cover window-switch and refocus recovery behavior.
+- Added a desktop file dialog recovery benchmark to cover failed file picker flows.
+- Added a desktop upload recovery benchmark to cover failed transfer and upload flows.
+- Added a browser-to-desktop-to-browser download/rename/upload benchmark to cover a realistic mixed file workflow.
+- Workflow pack catalog now shows outcomes, install feedback, installed-state sorting, and installed-only filtering.
+- Result/history/task-run surfaces now normalize `executionTarget` and `actionContract` so desktop metadata persists cleanly across reloads.
 
 ## Near-Term Roadmap
 

@@ -9,6 +9,7 @@ describe('taskRouting', () => {
         expect(route.executionMode).toBe('dom');
         expect(route.routeMode).toBe('dom');
         expect(route.explicit).toBe(false);
+        expect(route.executionTarget).toEqual({ kind: 'browser', environment: 'playwright' });
     });
     it('routes visually ambiguous tasks to visual execution', () => {
         const route = resolveTaskExecutionRoute({
@@ -19,6 +20,7 @@ describe('taskRouting', () => {
         expect(route.executionMode).toBe('visual');
         expect(route.routeMode).toBe('cua');
         expect(route.reason).toContain('visual interaction flow');
+        expect(route.executionTarget).toEqual({ kind: 'browser', environment: 'playwright' });
         expect(route.visualProviderRequirements).toMatchObject({
             builtInComputerTool: true,
             batchedActions: true,
@@ -34,12 +36,23 @@ describe('taskRouting', () => {
         expect(route.executionMode).toBe('hybrid');
         expect(route.routeMode).toBe('hybrid');
         expect(route.explicit).toBe(true);
+        expect(route.executionTarget).toEqual({ kind: 'hybrid', environment: 'playwright' });
         expect(route.visualProviderRequirements).toMatchObject({
             structuredOutput: true,
             batchedActions: true,
             toolCalling: true,
             supportsReasoningControl: true,
         });
+    });
+    it('routes desktop-targeted tasks to a desktop execution target', () => {
+        const route = resolveTaskExecutionRoute({
+            task: 'Open the local notes app and save a draft',
+            source: 'chat',
+            executionTargetKind: 'desktop',
+        });
+        expect(route.executionMode).toBe('visual');
+        expect(route.executionTarget).toEqual({ kind: 'desktop', environment: 'vm' });
+        expect(route.reason).toContain('desktop');
     });
     it('selects a visual provider when provider candidates are available', () => {
         const route = resolveTaskExecutionRoute({

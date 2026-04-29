@@ -10,6 +10,8 @@ import { CLIExecutor } from '../core/executor/CLIExecutor';
 import { ActionType } from '../core/action/ActionSchema';
 import { createMainAgent, MainAgent, AgentStep, AgentResult } from '../agents/mainAgent';
 import { executeVisualBrowserTask, resolveVisualAdapterMode } from '../agents/visualBrowserHelper';
+import { ActionContract } from '../core/task/types';
+import { normalizeActionContract } from '../core/task/actionContract';
 import { ScheduleType } from '../scheduler/types';
 import { getIMConfigStore } from '../config/imConfig';
 import { getSettingsManager } from '../config/settings';
@@ -51,6 +53,7 @@ import { resolveTemplateInput } from '../core/task/templateUtils';
 import { getDispatchService } from '../im/DispatchService';
 import { VisualAutomationService } from '../visual/VisualAutomationService';
 import { HybridToolRouter } from '../visual';
+import type { BrowserDesktopHandoffWorkflowResult } from '../visual/VisualAutomationService';
 
 const taskEngine = new TaskEngine();
 const benchmarkRunService = new BenchmarkRunService();
@@ -311,6 +314,99 @@ function attachSkillCandidateToResult(result: any, skillCandidate: unknown): any
   };
 }
 
+function normalizeTaskResult(result: unknown): unknown {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return result;
+  }
+
+  const record = result as Record<string, unknown> & { actionContract?: ActionContract };
+  if (record.actionContract) {
+    return result;
+  }
+
+  const rawOutput = record.rawOutput;
+  if (!rawOutput || typeof rawOutput !== 'object' || Array.isArray(rawOutput)) {
+    return result;
+  }
+
+  const actionContract = normalizeActionContract((rawOutput as Record<string, unknown>).actionContract);
+  if (!actionContract) {
+    return result;
+  }
+
+  return {
+    ...record,
+    actionContract,
+  };
+}
+
+function isMixedBrowserDesktopBenchmark(benchmarkId: unknown): boolean {
+  return (
+    benchmarkId === 'benchmark-desktop-browser-handoff' ||
+    benchmarkId === 'benchmark-desktop-browser-finish' ||
+    benchmarkId === 'benchmark-desktop-download-rename-upload'
+  );
+}
+
+function buildMixedWorkflowStepTasks(benchmarkId: string, task: string): {
+  browserTask: string;
+  desktopTask: string;
+  finalBrowserTask?: string;
+} {
+  switch (benchmarkId) {
+    case 'benchmark-desktop-browser-handoff':
+    case 'benchmark-desktop-download-rename-upload':
+      return {
+        browserTask: `${task}\n\nBrowser step: download the source file and keep the browser context ready for the desktop handoff.`,
+        desktopTask: `${task}\n\nDesktop step: switch to the desktop target and rename the downloaded file.`,
+        finalBrowserTask: `${task}\n\nFinal browser step: return to the browser and upload the renamed file to finish the workflow.`,
+      };
+    case 'benchmark-desktop-browser-finish':
+      return {
+        browserTask: `${task}\n\nBrowser step: research the request in the browser and prepare the final local handoff.`,
+        desktopTask: `${task}\n\nDesktop step: switch to the desktop target and complete the final local action.`,
+        finalBrowserTask: `${task}\n\nFinal browser step: confirm the workflow finished cleanly.`,
+      };
+    default:
+      return {
+        browserTask: task,
+        desktopTask: task,
+        finalBrowserTask: task,
+      };
+  }
+}
+
+function buildMixedWorkflowAgentResult(
+  workflowResult: BrowserDesktopHandoffWorkflowResult,
+  task: string
+): AgentResult {
+  const steps = workflowResult.steps.map((step, index) => ({
+    id: `mixed-workflow-step-${index + 1}`,
+    toolName: step.name === 'final-browser' ? 'browser-desktop-handoff:final-browser' : `browser-desktop-handoff:${step.name}`,
+    args: {
+      task: step.task,
+      executionTarget: step.result.executionTarget,
+      routeReason: step.result.routeReason,
+    },
+    status: (step.result.success ? 'completed' : 'error') as AgentStep['status'],
+    result: step.result,
+  }));
+
+  return {
+    success: workflowResult.success,
+    output: {
+      task,
+      routeReason: workflowResult.routeReason,
+      steps: workflowResult.steps,
+      finalResult: workflowResult.finalResult,
+      failedStep: workflowResult.failedStep,
+    },
+    finalMessage: workflowResult.finalResult?.finalMessage || workflowResult.failedStep?.result?.error?.message,
+    steps,
+    error: workflowResult.success ? undefined : workflowResult.failedStep?.result?.error?.message || 'Browser-desktop handoff workflow failed',
+  };
+}
+
 function getBrowserExecutor(): BrowserExecutor {
   if (!browserExecutor) {
     browserExecutor = new BrowserExecutor();
@@ -448,9 +544,9 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
   'task:start': async (
     mainWindow,
     previewWindow,
-    { task, threadId, source = 'chat', templateId, params, executionMode }
+    { task, threadId, source = 'chat', templateId, params, executionMode, executionTargetKind }
   ) => {
-    console.log('[IPC] task:start:', task, 'threadId:', threadId, 'source:', source, 'executionMode:', executionMode);
+    console.log('[IPC] task:start:', task, 'threadId:', threadId, 'source:', source, 'executionMode:', executionMode, 'executionTargetKind:', executionTargetKind);
 
     try {
       const agent = await ensureSharedAgent(mainWindow, previewWindow);
@@ -475,7 +571,9 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
         task,
         source,
         executionMode,
+        executionTargetKind,
       });
+      const benchmarkId = typeof params?.benchmarkId === 'string' ? params.benchmarkId : undefined;
       const taskOrchestrator = getTaskOrchestrator();
       const run = taskOrchestrator.startRun({
         runId: handleId,
@@ -502,28 +600,63 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
       void taskOrchestrator
         .executeRun(handleId, async () => {
           if (route.executionMode === 'visual' || route.executionMode === 'hybrid') {
-            const visualResult = await executeVisualBrowserTask({
-              task,
-              adapterMode: resolveVisualAdapterMode(route.executionMode, route.visualProvider),
-              maxTurns: 8,
-              visualProvider: route.visualProvider,
-            });
-
-            if (visualResult?.pendingApproval) {
-              pendingApprovalPayload = visualResult;
-              const approvalError = createTaskResultError(
-                visualResult.error?.message || 'Approval required before executing visual actions',
-                'APPROVAL_REQUIRED'
-              );
-              throw Object.assign(new Error(approvalError.message), {
-                code: approvalError.code,
-                pendingApproval: visualResult.pendingApproval,
-                adapterMode: visualResult.adapterMode,
-                maxTurns: visualResult.maxTurns,
+            if (benchmarkId && isMixedBrowserDesktopBenchmark(benchmarkId) && route.executionTarget.kind === 'desktop') {
+              const mixedWorkflowTasks = buildMixedWorkflowStepTasks(benchmarkId, task);
+              const workflowResult = await getVisualAutomationService().runBrowserDesktopHandoffWorkflow({
+                browserTask: mixedWorkflowTasks.browserTask,
+                desktopTask: mixedWorkflowTasks.desktopTask,
+                finalBrowserTask: mixedWorkflowTasks.finalBrowserTask,
+                adapterMode: resolveVisualAdapterMode(route.executionMode, route.visualProvider),
+                maxTurnsPerStep: 8,
+                visualProvider: route.visualProvider,
               });
-            }
 
-            latestAgentResult = visualResult;
+              if (!workflowResult.success) {
+                const failedStepResult = workflowResult.failedStep?.result;
+                if (failedStepResult?.pendingApproval) {
+                  pendingApprovalPayload = failedStepResult;
+                  const approvalError = createTaskResultError(
+                    failedStepResult.error?.message || 'Approval required before executing mixed workflow actions',
+                    'APPROVAL_REQUIRED'
+                  );
+                  throw Object.assign(new Error(approvalError.message), {
+                    code: approvalError.code,
+                    pendingApproval: failedStepResult.pendingApproval,
+                    adapterMode: failedStepResult.adapterMode,
+                    maxTurns: failedStepResult.maxTurns,
+                  });
+                }
+
+                latestAgentResult = buildMixedWorkflowAgentResult(workflowResult, task);
+                throw new Error(failedStepResult?.error?.message || 'Browser-desktop handoff workflow failed');
+              }
+
+              latestAgentResult = buildMixedWorkflowAgentResult(workflowResult, task);
+            } else {
+              const visualResult = await executeVisualBrowserTask({
+                task,
+                adapterMode: resolveVisualAdapterMode(route.executionMode, route.visualProvider),
+                maxTurns: 8,
+                visualProvider: route.visualProvider,
+                executionTarget: route.executionTarget,
+              });
+
+              if (visualResult?.pendingApproval) {
+                pendingApprovalPayload = visualResult;
+                const approvalError = createTaskResultError(
+                  visualResult.error?.message || 'Approval required before executing visual actions',
+                  'APPROVAL_REQUIRED'
+                );
+                throw Object.assign(new Error(approvalError.message), {
+                  code: approvalError.code,
+                  pendingApproval: visualResult.pendingApproval,
+                  adapterMode: visualResult.adapterMode,
+                  maxTurns: visualResult.maxTurns,
+                });
+              }
+
+              latestAgentResult = visualResult;
+            }
           } else {
             latestAgentResult = await agent.run(task);
           }
@@ -1044,6 +1177,7 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
       maxTurns: payload?.maxTurns,
       launchIfNeeded: payload?.launchIfNeeded,
       approvalEnabled: payload?.approvalEnabled,
+      executionTarget: payload?.executionTarget,
     });
 
     return result;
@@ -1057,6 +1191,7 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
       adapterMode: payload?.adapterMode,
       model: payload?.model,
       maxTurns: payload?.maxTurns,
+      executionTarget: payload?.executionTarget,
     });
     const approvalResult = result as {
       success?: boolean;
@@ -1608,7 +1743,10 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     try {
       const { getHistoryService } = await import('../history/historyService.js');
       const historyService = getHistoryService();
-      const tasks = await historyService.listTasks(options || {});
+      const tasks = (await historyService.listTasks(options || {})).map((task) => ({
+        ...task,
+        result: normalizeTaskResult(task.result),
+      }));
       return { data: tasks, total: tasks.length };
     } catch (error: any) {
       console.error('[IPC] history:list error:', error);
@@ -1620,7 +1758,7 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     try {
       const { getHistoryService } = await import('../history/historyService.js');
       const historyService = getHistoryService();
-      const task = await historyService.getTask(taskId);
+      const task = normalizeTaskResult(await historyService.getTask(taskId));
       return { data: task };
     } catch (error: any) {
       console.error('[IPC] history:get error:', error);
@@ -1786,6 +1924,7 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
             templateId: request.templateId,
             params: request.params,
             executionMode: request.executionMode,
+            executionTargetKind: request.executionTargetKind,
           });
 
           return {
@@ -2347,15 +2486,12 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     try {
       const { SkillMarket } = await import('../skills/skillMarket.js');
       const market = new SkillMarket();
-      const frontmatter = payload.frontmatter || {
-        name: payload.name,
-        description: payload.description,
-      };
-      await market.saveSkill(
-        frontmatter,
-        payload.content,
-        payload.source || frontmatter.source || 'agent-created'
-      );
+      const name = payload.name || payload.frontmatter?.name;
+      if (!name) {
+        return { success: false, error: 'Skill name is required' };
+      }
+
+      await market.updateSkill(name);
       return { success: true };
     } catch (error: any) {
       console.error('[IPC] skill:update error:', error);

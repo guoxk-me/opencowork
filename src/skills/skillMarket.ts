@@ -106,6 +106,33 @@ function buildSkillProductMetadata(skill: InstalledSkill): Pick<
   };
 }
 
+function parseVersion(version?: string): number[] {
+  if (!version) {
+    return [];
+  }
+
+  return version
+    .split('.')
+    .map((segment) => Number.parseInt(segment.replace(/[^0-9].*$/, ''), 10))
+    .map((segment) => (Number.isNaN(segment) ? 0 : segment));
+}
+
+function compareVersions(left?: string, right?: string): number {
+  const leftParts = parseVersion(left);
+  const rightParts = parseVersion(right);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index] ?? 0;
+    const rightPart = rightParts[index] ?? 0;
+    if (leftPart !== rightPart) {
+      return leftPart - rightPart;
+    }
+  }
+
+  return 0;
+}
+
 export class SkillMarket {
   private skillsDir: string;
   private loader: SkillLoader;
@@ -118,6 +145,18 @@ export class SkillMarket {
 
   async listInstalledSkills(source?: SkillSource): Promise<SkillListing[]> {
     const skills = await this.loader.loadAllSkills();
+    const updateCandidates = new Map<string, InstalledSkill[]>();
+
+    for (const skill of skills) {
+      if (!skill.source) {
+        continue;
+      }
+
+      const existing = updateCandidates.get(skill.manifest.name) || [];
+      existing.push(skill);
+      updateCandidates.set(skill.manifest.name, existing);
+    }
+
     return skills
       .map((s) => ({
         name: s.manifest.name,
@@ -125,6 +164,7 @@ export class SkillMarket {
         description: s.manifest.description,
         path: s.path,
         installed: true,
+        updateAvailable: this.hasUpdateAvailable(s, updateCandidates.get(s.manifest.name) || []),
         source: s.source,
         ...buildSkillProductMetadata(s),
       }))
@@ -200,7 +240,29 @@ export class SkillMarket {
       if (!skill) {
         return { success: false, error: 'Skill not found' };
       }
-      return { success: false, error: 'Update not implemented - please uninstall and reinstall' };
+
+      const candidates = (await this.loader.loadAllSkills()).filter(
+        (candidate) => candidate.manifest.name === skillName && candidate.path !== skill.path
+      );
+      const latestCandidate = candidates.sort((left, right) =>
+        compareVersions(right.version, left.version)
+      )[0];
+
+      if (latestCandidate && compareVersions(latestCandidate.version, skill.version) > 0) {
+        await fs.promises.rm(skill.path, { recursive: true, force: true });
+        await fs.promises.cp(latestCandidate.path, skill.path, { recursive: true });
+      } else {
+        // Clear cached manifests so the next read reflects any on-disk edits.
+        this.loader.clearCache();
+        const refreshedSkill = await this.loader.getSkill(skillName);
+        if (!refreshedSkill) {
+          return { success: false, error: 'Failed to refresh skill' };
+        }
+      }
+
+      this.loader.clearCache();
+
+      return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -274,6 +336,18 @@ export class SkillMarket {
 
   cleanup(): void {
     console.log('[SkillMarket] Cleaned up');
+  }
+
+  private hasUpdateAvailable(skill: InstalledSkill, candidates: InstalledSkill[]): boolean {
+    const newerCandidate = candidates.some((candidate) => {
+      if (candidate.path === skill.path) {
+        return false;
+      }
+
+      return compareVersions(candidate.version, skill.version) > 0;
+    });
+
+    return newerCandidate;
   }
 }
 

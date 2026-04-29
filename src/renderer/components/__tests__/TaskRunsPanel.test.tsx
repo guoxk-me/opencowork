@@ -52,29 +52,36 @@ const invoke = vi.fn(async (channel: string) => {
           result: {
             id: 'result-1',
             summary: 'Visual fallback completed successfully',
-          artifacts: [],
-          reusable: true,
-          completedAt: 1710000005000,
-          rawOutput: {
-            visualTrace: [
-              {
-                source: 'step',
-                routeReason: 'browser-action-visual-route',
-                fallbackReason: 'Recoverable selector failure',
-                approvedActions: [{ type: 'click' }],
-                turns: [
-                  {
-                    turnId: 'turn-1',
-                    proposedActions: [{ type: 'click' }, { type: 'type' }],
-                    executedActions: [{ type: 'click' }, { type: 'type' }],
-                    finalMessage: 'Search submitted',
-                    duration: 1200,
-                  },
+            artifacts: [],
+            reusable: true,
+            completedAt: 1710000005000,
+            rawOutput: {
+              actionContract: {
+                supportedActions: ['open_application', 'focus_window'],
+                workflowSemantics: [
+                  { action: 'open_application', summary: 'Launch a desktop app' },
+                  { action: 'focus_window', summary: 'Bring a window to the foreground' },
                 ],
               },
-            ],
+              visualTrace: [
+                {
+                  source: 'step',
+                  routeReason: 'browser-action-visual-route',
+                  fallbackReason: 'Recoverable selector failure',
+                  approvedActions: [{ type: 'click' }],
+                  turns: [
+                    {
+                      turnId: 'turn-1',
+                      proposedActions: [{ type: 'click' }, { type: 'type' }],
+                      executedActions: [{ type: 'click' }, { type: 'type' }],
+                      finalMessage: 'Search submitted',
+                      duration: 1200,
+                    },
+                  ],
+                },
+              ],
+            },
           },
-        },
         template: null,
         history: null,
       },
@@ -166,6 +173,8 @@ describe('TaskRunsPanel', () => {
       screen.getAllByText((_, element) => element?.textContent?.replace(/\s+/g, ' ').includes('score: 92') ?? false).length
     ).toBeGreaterThan(0);
     expect(screen.getAllByText('highest completion').length).toBeGreaterThan(0);
+    expect(screen.getByText('open_application')).toBeInTheDocument();
+    expect(screen.getByText('Launch a desktop app')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'template:template-1' }));

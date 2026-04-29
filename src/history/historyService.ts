@@ -177,6 +177,7 @@ export class HistoryService {
       summary?: string;
       artifacts?: import('./taskHistory').TaskResult['artifacts'];
       rawOutput?: unknown;
+      actionContract?: import('./taskHistory').TaskResult['actionContract'];
       structuredData?: unknown;
       taskError?: import('./taskHistory').TaskResult['taskError'];
       reusable?: boolean;

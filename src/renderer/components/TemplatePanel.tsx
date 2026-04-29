@@ -29,8 +29,13 @@ export function TemplatePanel({ isOpen, onClose, preferredTemplateId = null }: T
   const [workflowPacks, setWorkflowPacks] = useState<TaskWorkflowPack[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isInstallingPackId, setIsInstallingPackId] = useState<string | null>(null);
+  const [workflowPackMessage, setWorkflowPackMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [showInstalledWorkflowPacksOnly, setShowInstalledWorkflowPacksOnly] = useState(false);
   const [profileFilter, setProfileFilter] = useState<'all' | TaskTemplate['executionProfile']>('all');
   const [runPrompt, setRunPrompt] = useState('');
   const [runInputValues, setRunInputValues] = useState<Record<string, string>>({});
@@ -100,10 +105,11 @@ export function TemplatePanel({ isOpen, onClose, preferredTemplateId = null }: T
     }
   };
 
-  const handleInstallWorkflowPack = async (packId: string) => {
+  const handleInstallWorkflowPack = async (pack: TaskWorkflowPack) => {
     try {
-      setIsInstallingPackId(packId);
-      const result = await window.electron.invoke('workflow-pack:install', { packId });
+      setIsInstallingPackId(pack.id);
+      setWorkflowPackMessage(null);
+      const result = await window.electron.invoke('workflow-pack:install', { packId: pack.id });
       if (!result?.success) {
         throw new Error(result?.error || 'Failed to install workflow pack');
       }
@@ -111,7 +117,15 @@ export function TemplatePanel({ isOpen, onClose, preferredTemplateId = null }: T
       const payload = result?.data || result;
       await loadTemplates(payload?.selectedTemplateId || undefined);
       await loadWorkflowPacks();
+      setWorkflowPackMessage({
+        type: 'success',
+        text: `${pack.name}: installed ${payload?.installedCount || 0} templates`,
+      });
     } catch (error) {
+      setWorkflowPackMessage({
+        type: 'error',
+        text: `${pack.name}: ${error instanceof Error ? error.message : String(error)}`,
+      });
       console.error('[TemplatePanel] Failed to install workflow pack:', error);
     } finally {
       setIsInstallingPackId(null);
@@ -312,6 +326,45 @@ export function TemplatePanel({ isOpen, onClose, preferredTemplateId = null }: T
     return matchesKeyword && matchesProfile;
   });
 
+  const filteredWorkflowPacks = workflowPacks.filter((pack) => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return true;
+    }
+
+    return [
+      pack.name,
+      pack.category,
+      pack.description,
+      pack.summary,
+      ...(pack.outcomes || []),
+      ...(pack.recommendedSkills || []),
+      ...pack.templates.map((template) => template.name),
+    ].some((value) => value.toLowerCase().includes(keyword));
+  });
+
+  const installedWorkflowPackIds = workflowPacks
+    .filter((pack) =>
+      pack.templates.every((template) =>
+        templates.some((installedTemplate) => installedTemplate.id === `workflow-pack-${pack.id}-${template.id}`)
+      )
+    )
+    .map((pack) => pack.id);
+
+  const visibleWorkflowPacks = [...filteredWorkflowPacks]
+    .filter((pack) => !showInstalledWorkflowPacksOnly || installedWorkflowPackIds.includes(pack.id))
+    .sort((left, right) => {
+      const leftInstalled = installedWorkflowPackIds.includes(left.id) ? 1 : 0;
+      const rightInstalled = installedWorkflowPackIds.includes(right.id) ? 1 : 0;
+      return rightInstalled - leftInstalled;
+    });
+
+  const installedPacksOnlyLabel = t('taskPanels.installedPacksOnly');
+  const installedPacksOnlyText =
+    installedPacksOnlyLabel === 'taskPanels.installedPacksOnly'
+      ? 'Installed only'
+      : installedPacksOnlyLabel;
+
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/50" onClick={onClose} />
@@ -356,6 +409,16 @@ export function TemplatePanel({ isOpen, onClose, preferredTemplateId = null }: T
             <option value="browser-first">browser-first</option>
             <option value="mixed">mixed</option>
           </select>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={showInstalledWorkflowPacksOnly}
+              onChange={(e) => setShowInstalledWorkflowPacksOnly(e.target.checked)}
+              aria-label={installedPacksOnlyText}
+              className="rounded border-border bg-background"
+            />
+            {installedPacksOnlyText}
+          </label>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
@@ -370,31 +433,81 @@ export function TemplatePanel({ isOpen, onClose, preferredTemplateId = null }: T
                     {t('taskPanels.workflowPackCatalog')}
                   </div>
                 </div>
-                {workflowPacks.map((pack) => (
+                {visibleWorkflowPacks.map((pack) => (
                   <div key={pack.id} className="rounded-xl border border-border bg-background p-3">
-                    <div className="text-sm font-semibold text-white">{pack.name}</div>
-                    <div className="mt-1 text-[11px] text-text-muted">{pack.category}</div>
-                    <div className="mt-2 text-xs text-text-secondary">{pack.summary}</div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-                      <span className="rounded-full border border-border bg-surface px-2 py-0.5">
-                        {pack.templates.length} {t('taskPanels.packTemplates')}
-                      </span>
-                      <span className="rounded-full border border-border bg-surface px-2 py-0.5">
-                        {pack.recommendedSkills?.length || 0} {t('taskPanels.skills')}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleInstallWorkflowPack(pack.id)}
-                      className="mt-3 btn btn-secondary text-sm"
-                      disabled={isInstallingPackId === pack.id}
-                    >
-                      {isInstallingPackId === pack.id
-                        ? t('taskPanels.installingPack')
-                        : t('taskPanels.installPack')}
-                    </button>
+                    {(() => {
+                      const isInstalled =
+                        installedWorkflowPackIds.includes(pack.id) ||
+                        (workflowPackMessage?.type === 'success' &&
+                          workflowPackMessage.text.startsWith(`${pack.name}: installed`));
+
+                      return (
+                        <>
+                          <div className="text-sm font-semibold text-white">{pack.name}</div>
+                          <div className="mt-1 text-[11px] text-text-muted">{pack.category}</div>
+                          <div className="mt-2 text-xs text-text-secondary">{pack.summary}</div>
+                          {pack.outcomes && pack.outcomes.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {pack.outcomes.map((outcome) => (
+                                <span
+                                  key={outcome}
+                                  className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-text-secondary"
+                                >
+                                  {outcome}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                            <span className="rounded-full border border-border bg-surface px-2 py-0.5">
+                              {pack.templates.length} {t('taskPanels.packTemplates')}
+                            </span>
+                            <span className="rounded-full border border-border bg-surface px-2 py-0.5">
+                              {pack.recommendedSkills?.length || 0} {t('taskPanels.skills')}
+                            </span>
+                            {isInstalled && (
+                              <span className="rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-success">
+                                {t('taskPanels.installedPack') || 'Installed'}
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleInstallWorkflowPack(pack)}
+                            className="mt-3 btn btn-secondary text-sm"
+                            disabled={isInstallingPackId === pack.id}
+                          >
+                            {isInstallingPackId === pack.id
+                              ? t('taskPanels.installingPack')
+                              : isInstalled
+                                ? t('taskPanels.reinstallPack') || 'Reinstall'
+                                : t('taskPanels.installPack')}
+                          </button>
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
+                {visibleWorkflowPacks.length === 0 && (
+                  <div className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-text-muted">
+                    {showInstalledWorkflowPacksOnly
+                      ? (t('taskPanels.noInstalledWorkflowPacks') === 'taskPanels.noInstalledWorkflowPacks'
+                          ? 'No installed workflow packs yet'
+                          : t('taskPanels.noInstalledWorkflowPacks'))
+                      : t('taskPanels.noWorkflowPacksMatch') || 'No workflow packs match the current search'}
+                  </div>
+                )}
+                {workflowPackMessage && (
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-xs ${
+                      workflowPackMessage.type === 'success'
+                        ? 'border-success/40 bg-success/10 text-success'
+                        : 'border-danger/40 bg-danger/10 text-danger'
+                    }`}
+                  >
+                    {workflowPackMessage.text}
+                  </div>
+                )}
               </div>
             )}
 

@@ -1,0 +1,25 @@
+id: benchmark-desktop-upload-recovery
+name: Desktop Upload Recovery
+description: Recover from a failed upload interaction on the desktop target and complete the workflow.
+category: recovery-scenario
+prompt: Use the desktop target to upload a file, recover if the upload dialog or transfer fails, and confirm the task completed successfully.
+expectedOutcome:
+  successKeywords:
+    - upload
+    - recovered
+    - completed
+  minArtifacts: 1
+initialState:
+  initialUrl: about:blank
+executionConfig:
+  executionMode: visual
+  executionTargetKind: desktop
+  maxTurns: 8
+  adapterMode: chat-structured
+tags:
+  - desktop
+  - recovery
+  - upload
+  - p4
+createdAt: 1710000000000
+updatedAt: 1710000000000

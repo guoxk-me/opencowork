@@ -1,0 +1,27 @@
+id: benchmark-desktop-download-rename-upload
+name: Desktop Download Rename Upload
+description: Download a file in the browser, rename it on the desktop, then upload the renamed file back in the browser.
+category: multi-step
+prompt: Use the browser to download the source file, switch to the desktop target to rename the file, then return to the browser and upload the renamed file to finish the workflow.
+expectedOutcome:
+  successKeywords:
+    - downloaded
+    - renamed
+    - uploaded
+    - finished
+  minArtifacts: 1
+initialState:
+  initialUrl: https://example.com/downloads
+executionConfig:
+  executionMode: hybrid
+  executionTargetKind: desktop
+  maxTurns: 10
+  adapterMode: responses-computer
+tags:
+  - desktop
+  - browser
+  - hybrid
+  - file
+  - p4
+createdAt: 1710000000000
+updatedAt: 1710000000000

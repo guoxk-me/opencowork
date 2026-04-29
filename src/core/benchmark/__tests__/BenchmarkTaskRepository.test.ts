@@ -44,23 +44,24 @@ describe('BenchmarkTaskRepository', () => {
 
     fs.writeFileSync(
       path.join(tempDir, 'form.json'),
-      JSON.stringify(
-        {
-          id: 'benchmark-form',
-          name: 'Form benchmark',
-          description: 'Fill a form successfully',
+        JSON.stringify(
+          {
+            id: 'benchmark-form',
+            name: 'Form benchmark',
+            description: 'Fill a form successfully',
           category: 'form-filling',
           prompt: 'Complete the registration form.',
           expectedOutcome: {
             successKeywords: ['complete'],
             targetUrl: 'https://example.com/done',
           },
-          executionConfig: {
-            executionMode: 'hybrid',
-            adapterMode: 'responses-computer',
+            executionConfig: {
+              executionMode: 'hybrid',
+              executionTargetKind: 'desktop',
+              adapterMode: 'responses-computer',
+            },
+            tags: ['hybrid'],
           },
-          tags: ['hybrid'],
-        },
         null,
         2
       ),
@@ -75,6 +76,7 @@ describe('BenchmarkTaskRepository', () => {
     expect(repository.getById('benchmark-form')?.executionConfig?.adapterMode).toBe(
       'responses-computer'
     );
+    expect(repository.getById('benchmark-form')?.executionConfig?.executionTargetKind).toBe('desktop');
     expect(tasks[0].id).toBe('benchmark-form');
     expect(tasks[1].id).toBe('benchmark-search');
   });
@@ -131,5 +133,64 @@ describe('BenchmarkTaskRepository', () => {
     expect(tasks).toHaveLength(1);
     expect(tasks[0].id).toBe('benchmark-valid');
     expect(repository.getById('benchmark-invalid')).toBeNull();
+  });
+
+  it('loads the checked-in desktop benchmark definitions', () => {
+    const repository = new BenchmarkTaskRepository(path.join(process.cwd(), 'src', 'benchmarks'));
+
+    expect(repository.getById('benchmark-desktop-notes-smoke')).toMatchObject({
+      executionConfig: {
+        executionMode: 'visual',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-browser-handoff')).toMatchObject({
+      executionConfig: {
+        executionMode: 'hybrid',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-browser-reference-note')).toMatchObject({
+      executionConfig: {
+        executionMode: 'hybrid',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-approval-recovery')).toMatchObject({
+      executionConfig: {
+        executionMode: 'visual',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-browser-finish')).toMatchObject({
+      executionConfig: {
+        executionMode: 'hybrid',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-focus-recovery')).toMatchObject({
+      executionConfig: {
+        executionMode: 'visual',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-file-dialog-recovery')).toMatchObject({
+      executionConfig: {
+        executionMode: 'visual',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-upload-recovery')).toMatchObject({
+      executionConfig: {
+        executionMode: 'visual',
+        executionTargetKind: 'desktop',
+      },
+    });
+    expect(repository.getById('benchmark-desktop-download-rename-upload')).toMatchObject({
+      executionConfig: {
+        executionMode: 'hybrid',
+        executionTargetKind: 'desktop',
+      },
+    });
   });
 });

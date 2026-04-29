@@ -1,0 +1,24 @@
+id: benchmark-desktop-notes-smoke
+name: Desktop Notes Smoke
+description: Exercise the desktop execution target on a minimal local app workflow.
+category: multi-step
+prompt: Use the desktop target to open a notes app, draft a short reminder, save it, and confirm the note was written.
+expectedOutcome:
+  successKeywords:
+    - note
+    - saved
+    - completed
+  minArtifacts: 1
+initialState:
+  initialUrl: about:blank
+executionConfig:
+  executionMode: visual
+  executionTargetKind: desktop
+  maxTurns: 8
+  adapterMode: chat-structured
+tags:
+  - desktop
+  - smoke
+  - p4
+createdAt: 1710000000000
+updatedAt: 1710000000000

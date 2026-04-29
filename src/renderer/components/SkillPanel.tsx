@@ -40,6 +40,15 @@ function getRefreshMessage(t: ReturnType<typeof useTranslation>['t']): string {
   return translated === 'skillPanel.refreshSuccess' ? 'Skill library refreshed' : translated;
 }
 
+function getFallbackTranslation(
+  t: ReturnType<typeof useTranslation>['t'],
+  key: string,
+  fallback: string
+): string {
+  const translated = t(key);
+  return translated === key ? fallback : translated;
+}
+
 function getSkillDirectoryValidationMessage(
   code: string | undefined,
   fallback: string | undefined,
@@ -190,10 +199,54 @@ function InstallModal({ isOpen, onClose, onInstall, isLoading }: InstallModalPro
 
 export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
   const { t } = useTranslation();
+  const searchSkillsLabel = getFallbackTranslation(t, 'skillPanel.searchSkills', 'Search skills');
+  const sourceFilterLabel = getFallbackTranslation(t, 'skillPanel.sourceFilter', 'Skill source filter');
+  const invocableFilterLabel = getFallbackTranslation(
+    t,
+    'skillPanel.invocableFilter',
+    'Skill invocation filter'
+  );
+  const updateFilterLabel = getFallbackTranslation(t, 'skillPanel.updateFilter', 'Update filter');
   const [skills, setSkills] = useState<SkillListing[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'official' | 'agent-created' | 'market'>('all');
+  const [invocableFilter, setInvocableFilter] = useState<'all' | 'user' | 'model'>('all');
+  const [updateFilter, setUpdateFilter] = useState<'all' | 'update-available'>('all');
+
+  const filteredSkills = skills.filter((skill) => {
+    const matchesKeyword =
+      !searchKeyword.trim() ||
+      skill.name.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      skill.description.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      skill.path.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      (skill.tags || []).some((tag) => tag.toLowerCase().includes(searchKeyword.toLowerCase()));
+    const matchesSource = sourceFilter === 'all' || skill.source === sourceFilter;
+    const matchesInvocable =
+      invocableFilter === 'all' ||
+      (invocableFilter === 'user' && skill.userInvocable !== false) ||
+      (invocableFilter === 'model' && skill.userInvocable === false);
+    const matchesUpdate = updateFilter === 'all' || !!skill.updateAvailable;
+    return matchesKeyword && matchesSource && matchesInvocable && matchesUpdate;
+  });
+
+  const visibleSkills = [...filteredSkills].sort((left, right) => {
+    const leftUpdate = left.updateAvailable ? 1 : 0;
+    const rightUpdate = right.updateAvailable ? 1 : 0;
+    if (leftUpdate !== rightUpdate) {
+      return rightUpdate - leftUpdate;
+    }
+
+    const leftSource = left.source || '';
+    const rightSource = right.source || '';
+    if (leftSource !== rightSource) {
+      return leftSource.localeCompare(rightSource);
+    }
+
+    return left.name.localeCompare(right.name);
+  });
 
   const loadSkills = useCallback(async () => {
     setIsLoading(true);
@@ -276,6 +329,33 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
     }
   };
 
+  const handleUpdate = async (skillName: string) => {
+    setIsLoading(true);
+    try {
+      const result = await window.electron.invoke('skill:update', { name: skillName });
+      const payload = result?.data || result;
+      if (result?.success && payload?.success !== false) {
+        setMessage({ type: 'success', text: getFallbackTranslation(t, 'skillPanel.updateSuccess', 'Skill refreshed') });
+        await loadSkills();
+      } else {
+        setMessage({
+          type: 'error',
+          text:
+            payload?.error ||
+            result?.error ||
+            getFallbackTranslation(t, 'skillPanel.updateFailed', 'Skill refresh failed'),
+        });
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: `${getFallbackTranslation(t, 'skillPanel.updateFailed', 'Skill refresh failed')}: ${error}`,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleOpenSkillsDir = async () => {
     try {
       const result = await window.electron.invoke('skill:openDirectory');
@@ -295,6 +375,12 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
       console.error('[SkillPanel] Failed to open skills directory:', error);
       setMessage({ type: 'error', text: `${t('skillPanel.openFolderFailed')}: ${error}` });
     }
+  };
+
+  const handleResetFilters = () => {
+    setSearchKeyword('');
+    setSourceFilter('all');
+    setInvocableFilter('all');
   };
 
   if (!isOpen) {
@@ -322,6 +408,10 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
                 </span>
               )}
             </div>
+            <div className="text-xs text-text-muted">
+              {skills.length} {t('skillPanel.skills') || 'skills'} · {filteredSkills.length}{' '}
+              {t('skillPanel.visible') || 'visible'}
+            </div>
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-border text-text-muted hover:text-white"
@@ -339,6 +429,49 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
 
           {/* Toolbar */}
           <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
+            <input
+              type="text"
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+              placeholder={searchSkillsLabel}
+              aria-label={searchSkillsLabel}
+              className="w-56 rounded border border-border bg-background px-3 py-1 text-sm text-white"
+            />
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as typeof sourceFilter)}
+              aria-label={sourceFilterLabel}
+              className="rounded border border-border bg-background px-2 py-1 text-sm text-white"
+            >
+              <option value="all">{t('skillPanel.allSources') || 'All sources'}</option>
+              <option value="official">official</option>
+              <option value="agent-created">agent-created</option>
+              <option value="market">market</option>
+            </select>
+          <select
+            value={invocableFilter}
+            onChange={(e) => setInvocableFilter(e.target.value as typeof invocableFilter)}
+            aria-label={invocableFilterLabel}
+            className="rounded border border-border bg-background px-2 py-1 text-sm text-white"
+            >
+              <option value="all">{t('skillPanel.allCapabilities') || 'All capabilities'}</option>
+              <option value="user">{t('skillPanel.userInvocable') || 'User invocable'}</option>
+              <option value="model">{t('skillPanel.modelOnly') || 'Model only'}</option>
+            </select>
+            <select
+              value={updateFilter}
+              onChange={(e) => setUpdateFilter(e.target.value as typeof updateFilter)}
+              aria-label={updateFilterLabel}
+              className="rounded border border-border bg-background px-2 py-1 text-sm text-white"
+            >
+              <option value="all">{t('skillPanel.allUpdates') || 'All updates'}</option>
+              <option value="update-available">
+                {t('skillPanel.updateAvailableOnly') || 'Updates available'}
+              </option>
+            </select>
+            <button onClick={handleResetFilters} className="btn btn-secondary text-sm">
+              {t('skillPanel.resetFilters') || 'Reset filters'}
+            </button>
             <button
               onClick={() => setShowInstallModal(true)}
               className="btn btn-primary text-sm"
@@ -363,9 +496,16 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
               <div className="flex flex-col items-center justify-center h-32 text-text-muted">
                 <p>{t('skillPanel.noSkills')}</p>
               </div>
+            ) : filteredSkills.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-text-muted">
+                <p>{t('skillPanel.noFilteredSkills') || 'No skills match the current filters'}</p>
+                <button onClick={handleResetFilters} className="mt-3 btn btn-secondary text-sm">
+                  {t('skillPanel.resetFilters') || 'Reset filters'}
+                </button>
+              </div>
             ) : (
               <div className="grid grid-cols-2 gap-4">
-                {skills.map((skill, index) => (
+                {visibleSkills.map((skill, index) => (
                   <div
                     key={skill.name || index}
                     className="bg-elevated border border-border rounded-lg p-4 hover:border-primary/50 transition-colors"
@@ -377,30 +517,59 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
                           <span className="text-xs text-text-muted">v{skill.version}</span>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleUninstall(skill.name)}
-                        className="p-1 rounded hover:bg-border text-text-muted hover:text-red-400"
-                        title="卸载"
-                      >
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => void handleUpdate(skill.name)}
+                          className="p-1 rounded hover:bg-border text-text-muted hover:text-primary"
+                          title={skill.updateAvailable ? 'Update skill' : 'Refresh skill'}
+                          aria-label={skill.updateAvailable ? 'Update skill' : 'Refresh skill'}
+                          disabled={isLoading}
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                          />
-                        </svg>
-                      </button>
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14.5-3M4 16a8 8 0 0014.5 3"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleUninstall(skill.name)}
+                          className="p-1 rounded hover:bg-border text-text-muted hover:text-red-400"
+                          title="卸载"
+                          disabled={isLoading}
+                        >
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-text-muted">
                       <span className="rounded bg-border px-2 py-0.5">
                         来源: {skill.source || 'unknown'}
                       </span>
+                      {skill.updateAvailable && (
+                        <span className="rounded bg-warning/15 px-2 py-0.5 text-warning">
+                          {getFallbackTranslation(t, 'skillPanel.updateAvailable', 'Update available')}
+                        </span>
+                      )}
                       <span className="rounded bg-border px-2 py-0.5">
                         {skill.userInvocable ? '可用户调用' : '仅模型调用'}
                       </span>

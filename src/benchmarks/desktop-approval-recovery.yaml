@@ -1,0 +1,25 @@
+id: benchmark-desktop-approval-recovery
+name: Desktop Approval Recovery
+description: Exercise approval interruption and recovery on the desktop execution target.
+category: approval-scenario
+prompt: Use the desktop target to start a sensitive action, approve the interruption, recover from any failure, and finish the task.
+expectedOutcome:
+  successKeywords:
+    - approved
+    - recovered
+    - completed
+  minArtifacts: 1
+initialState:
+  initialUrl: about:blank
+executionConfig:
+  executionMode: visual
+  executionTargetKind: desktop
+  maxTurns: 10
+  adapterMode: chat-structured
+tags:
+  - desktop
+  - approval
+  - recovery
+  - p4
+createdAt: 1710000000000
+updatedAt: 1710000000000

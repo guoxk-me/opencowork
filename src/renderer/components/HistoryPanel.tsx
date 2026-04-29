@@ -5,12 +5,15 @@ import { useTranslation } from '../i18n/useTranslation';
 import { useTaskStore } from '../stores/taskStore';
 import RelationBadge from './RelationBadge';
 import { extractVisualTraceSummary } from '../utils/visualTrace';
-import { SkillCandidateCard, SkillCandidateViewModel } from './SkillCandidateCard';
+import { extractActionContract } from '../utils/actionContract';
+import { SkillCandidateCard } from './SkillCandidateCard';
 import {
   listVisualProviderCapabilities,
   resolveVisualProviderLabel,
   resolveVisualProviderSelection,
 } from '../../core/visual/visualProviderMetadata';
+import { extractExecutionTarget, extractSkillCandidate } from '../utils/resultFields';
+import { parseLifecycleDetails } from '../utils/taskLifecycle';
 
 function getResultSummary(task: TaskHistoryRecord): string | undefined {
   return task.result?.summary || (typeof task.result?.output === 'string' ? task.result.output : undefined);
@@ -35,34 +38,6 @@ function hasVisualTrace(task: TaskHistoryRecord): boolean {
 
 type FilterTab = 'all' | 'completed' | 'failed' | 'cancelled';
 type OutcomeFilter = 'all' | 'result' | 'artifacts' | 'run' | 'template' | 'visual';
-
-interface LifecycleDetails {
-  approval: null | {
-    pending?: boolean;
-    approved?: boolean;
-    requestedAt?: number;
-    approvedAt?: number;
-    reason?: string;
-  };
-  takeover: null | {
-    active?: boolean;
-    interrupted?: boolean;
-    interruptReason?: string;
-    interruptedAt?: number;
-    resumedAt?: number;
-    restoredAt?: number;
-  };
-}
-
-function parseLifecycleDetails(metadata: Record<string, unknown> | undefined): LifecycleDetails {
-  const approval = metadata?.approval;
-  const takeover = metadata?.takeover;
-
-  return {
-    approval: approval && typeof approval === 'object' ? (approval as LifecycleDetails['approval']) : null,
-    takeover: takeover && typeof takeover === 'object' ? (takeover as LifecycleDetails['takeover']) : null,
-  };
-}
 
 export function HistoryPanel() {
   const { t } = useTranslation();
@@ -167,15 +142,8 @@ export function HistoryPanel() {
   const selectedVisualTrace = selectedTask?.result
     ? extractVisualTraceSummary(selectedTask.result.rawOutput)
     : null;
-  const selectedSkillCandidate =
-    selectedTask?.result?.rawOutput &&
-    typeof selectedTask.result.rawOutput === 'object' &&
-    !Array.isArray(selectedTask.result.rawOutput)
-      ? ((selectedTask.result.rawOutput as Record<string, unknown>).skillCandidate as SkillCandidateViewModel | undefined)
-      : undefined;
-  const selectedLifecycle = parseLifecycleDetails(
-    (selectedTask?.metadata as Record<string, unknown> | undefined) || undefined
-  );
+  const selectedSkillCandidate = extractSkillCandidate(selectedTask?.result?.rawOutput);
+  const selectedLifecycle = parseLifecycleDetails(selectedTask?.metadata);
   const selectedVisualProviderLabel = selectedTask ? resolveVisualProviderLabel(selectedTask.metadata) : null;
   const selectedVisualProviderSelection = selectedTask
     ? resolveVisualProviderSelection(selectedTask.metadata)
@@ -183,6 +151,8 @@ export function HistoryPanel() {
   const selectedVisualProviderCapabilities = selectedTask
     ? listVisualProviderCapabilities(selectedTask.metadata)
     : [];
+  const selectedExecutionTarget = extractExecutionTarget(selectedTask?.metadata);
+  const selectedActionContract = extractActionContract(selectedTask?.result);
   const handleTabChange = (tab: FilterTab) => {
     setActiveTab(tab);
   };
@@ -492,6 +462,27 @@ export function HistoryPanel() {
                             <RelationBadge
                               label="provider"
                               value={selectedVisualProviderLabel}
+                              tone="muted"
+                            />
+                          )}
+                          {selectedExecutionTarget && (
+                            <RelationBadge
+                              label="target"
+                              value={`${selectedExecutionTarget.kind || 'browser'}:${selectedExecutionTarget.environment || 'playwright'}`}
+                              tone="muted"
+                            />
+                          )}
+                          {selectedActionContract && (
+                            <RelationBadge
+                              label="desktop contract"
+                              value={
+                                selectedActionContract.workflowSemantics && selectedActionContract.workflowSemantics.length > 0
+                                  ? selectedActionContract.workflowSemantics
+                                      .slice(0, 2)
+                                      .map((semantic) => `${semantic.action}: ${semantic.summary}`)
+                                      .join(' | ')
+                                  : selectedActionContract.supportedActions?.slice(0, 3).join(', ') || 'none'
+                              }
                               tone="muted"
                             />
                           )}

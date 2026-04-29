@@ -62,6 +62,7 @@ export function VisualApprovalDialog() {
             summary,
             artifacts: [],
             rawOutput: payload,
+            actionContract: payload.actionContract,
             reusable: false,
             completedAt: Date.now(),
           });
@@ -77,6 +78,9 @@ export function VisualApprovalDialog() {
         setVisualApprovalRequest({
           runId: visualApprovalRequest.runId,
           reason: payload.error?.message || t('visualRun.approvalRequired'),
+          actionRiskReasons: payload.pendingApproval?.audit?.actionRiskReasons || visualApprovalRequest.actionRiskReasons || [],
+          matchedIntentKeywords: payload.pendingApproval?.audit?.matchedIntentKeywords || visualApprovalRequest.matchedIntentKeywords || [],
+          executionTarget: payload.pendingApproval?.taskContext?.executionTarget || visualApprovalRequest.executionTarget,
           actions: payload.pendingApproval.actions || [],
           taskDescription: payload.pendingApproval.taskContext?.task || visualApprovalRequest.taskDescription,
           adapterMode: visualApprovalRequest.adapterMode,
@@ -116,6 +120,10 @@ export function VisualApprovalDialog() {
     }
   };
 
+  const executionTargetLabel = visualApprovalRequest.executionTarget
+    ? `${visualApprovalRequest.executionTarget.kind} / ${visualApprovalRequest.executionTarget.environment}`
+    : null;
+
   return (
     <div className="modal-overlay">
       <div className="modal-content max-w-[520px]">
@@ -145,6 +153,42 @@ export function VisualApprovalDialog() {
               {t('visualApproval.task')}
             </div>
             <div>{visualApprovalRequest.taskDescription}</div>
+          </div>
+        )}
+
+        {executionTargetLabel && (
+          <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] p-3 text-sm text-[var(--color-text-secondary)]">
+            <div className="font-medium text-[var(--color-text-primary)] mb-1">Execution target</div>
+            <div>{executionTargetLabel}</div>
+          </div>
+        )}
+
+        {((visualApprovalRequest.actionRiskReasons && visualApprovalRequest.actionRiskReasons.length > 0) ||
+          (visualApprovalRequest.matchedIntentKeywords && visualApprovalRequest.matchedIntentKeywords.length > 0)) && (
+          <div className="mb-4 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-[var(--color-text-secondary)]">
+            <div className="font-medium text-warning mb-2">Why this was paused</div>
+            {visualApprovalRequest.matchedIntentKeywords && visualApprovalRequest.matchedIntentKeywords.length > 0 && (
+              <div className="mb-2">
+                <div className="text-xs uppercase text-text-muted mb-1">Matched intent keywords</div>
+                <div className="flex flex-wrap gap-2">
+                  {visualApprovalRequest.matchedIntentKeywords.map((keyword) => (
+                    <span key={keyword} className="rounded bg-surface px-2 py-0.5 text-xs text-white">
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {visualApprovalRequest.actionRiskReasons && visualApprovalRequest.actionRiskReasons.length > 0 && (
+              <div>
+                <div className="text-xs uppercase text-text-muted mb-1">Action risk reasons</div>
+                <ul className="list-disc pl-5 space-y-1">
+                  {visualApprovalRequest.actionRiskReasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 

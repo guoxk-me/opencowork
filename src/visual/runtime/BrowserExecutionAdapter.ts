@@ -6,18 +6,13 @@ import {
   VisualPageContext,
   VisualTurnError,
 } from '../types/visualProtocol';
+import { ComputerExecutionAdapter, ComputerExecutionTarget } from './ComputerExecutionAdapter';
 import { normalizeAction, normalizeDragPath } from './ActionNormalizer';
 
-export interface BrowserExecutionAdapter {
-  captureObservation(): Promise<VisualObservation>;
-
-  executeActions(actions: UIAction[]): Promise<ActionExecutionResult>;
-
-  getPageContext(): Promise<VisualPageContext>;
-}
+export interface BrowserExecutionAdapter extends ComputerExecutionAdapter {}
 
 export class PlaywrightBrowserExecutionAdapter implements BrowserExecutionAdapter {
-  constructor(private readonly browserExecutor: BrowserExecutor) {}
+  constructor(protected readonly browserExecutor: BrowserExecutor) {}
 
   async captureObservation(): Promise<VisualObservation> {
     const [screenshotBase64, url, domSummary, pageStructure] = await Promise.all([
@@ -121,6 +116,21 @@ export class PlaywrightBrowserExecutionAdapter implements BrowserExecutionAdapte
   async getPageContext(): Promise<VisualPageContext> {
     const observation = await this.captureObservation();
     return observation.page || {};
+  }
+
+  async getExecutionTarget(): Promise<ComputerExecutionTarget> {
+    return {
+      kind: 'browser',
+      environment: 'playwright',
+    };
+  }
+
+  async getExecutionContext(): Promise<Record<string, unknown>> {
+    const pageContext = await this.getPageContext();
+    return {
+      url: pageContext.url || null,
+      title: pageContext.title || null,
+    };
   }
 
   private async getPageTitle(): Promise<string | null> {

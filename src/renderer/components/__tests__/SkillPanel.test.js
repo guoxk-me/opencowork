@@ -1,5 +1,5 @@
 import { jsx as _jsx } from "react/jsx-runtime";
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../i18n/useTranslation', () => ({
     useTranslation: () => ({
@@ -16,12 +16,27 @@ describe('SkillPanel', () => {
                     success: true,
                     data: [
                         {
+                            name: 'meeting-note',
+                            version: '0.2.0',
+                            description: 'Capture and summarize meeting notes',
+                            path: '/skills/meeting-note',
+                            installed: true,
+                            source: 'agent-created',
+                            userInvocable: false,
+                            useCases: ['Meeting summary'],
+                            inputSpec: 'Meeting transcript or notes',
+                            outputSpec: 'Action items and summary',
+                            failureHints: ['Verify transcript completeness'],
+                            tags: ['notes'],
+                        },
+                        {
                             name: 'daily-report',
                             version: '1.0.0',
                             description: 'Generate a daily report',
                             path: '/skills/daily-report',
                             installed: true,
                             source: 'official',
+                            updateAvailable: true,
                             userInvocable: true,
                             useCases: ['Daily reporting', 'Team summary'],
                             inputSpec: 'Date range and data sources',
@@ -48,15 +63,15 @@ describe('SkillPanel', () => {
         await waitFor(() => {
             expect(screen.getByText('daily-report')).toBeInTheDocument();
         });
-        expect(screen.getByText('用途')).toBeInTheDocument();
+        expect(screen.getAllByText('用途').length).toBeGreaterThan(0);
         expect(screen.getByText('Daily reporting')).toBeInTheDocument();
-        expect(screen.getByText('输入')).toBeInTheDocument();
+        expect(screen.getAllByText('输入').length).toBeGreaterThan(0);
         expect(screen.getByText('Date range and data sources')).toBeInTheDocument();
-        expect(screen.getByText('输出')).toBeInTheDocument();
+        expect(screen.getAllByText('输出').length).toBeGreaterThan(0);
         expect(screen.getByText('Markdown report and summary card')).toBeInTheDocument();
-        expect(screen.getByText('失败提示')).toBeInTheDocument();
+        expect(screen.getAllByText('失败提示').length).toBeGreaterThan(0);
         expect(screen.getByText('Check Slack connection')).toBeInTheDocument();
-        expect(screen.getByText('允许工具')).toBeInTheDocument();
+        expect(screen.getAllByText('允许工具').length).toBeGreaterThan(0);
         expect(screen.getByText('connector:slack')).toBeInTheDocument();
         expect(screen.getByText((_, element) => element?.textContent === '来源: official')).toBeInTheDocument();
         expect(screen.getByText('可用户调用')).toBeInTheDocument();
@@ -74,5 +89,50 @@ describe('SkillPanel', () => {
             expect(invoke.mock.calls.filter(([channel]) => channel === 'skill:list').length).toBeGreaterThanOrEqual(2);
         });
         expect(screen.getByText('Skill library refreshed')).toBeInTheDocument();
+    });
+    it('filters skills by source and keyword', async () => {
+        const { SkillPanel } = await import('../SkillPanel');
+        render(_jsx(SkillPanel, { isOpen: true, onClose: vi.fn() }));
+        await waitFor(() => {
+            expect(screen.getByText('daily-report')).toBeInTheDocument();
+        });
+        expect(screen.getByText('meeting-note')).toBeInTheDocument();
+        fireEvent.change(screen.getAllByRole('combobox')[0], {
+            target: { value: 'official' },
+        });
+        expect(screen.getByText('daily-report')).toBeInTheDocument();
+        expect(screen.queryByText('meeting-note')).not.toBeInTheDocument();
+        fireEvent.change(screen.getByPlaceholderText(/search skills|skillPanel\.searchSkills/i), {
+            target: { value: 'daily' },
+        });
+        expect(screen.getByText('daily-report')).toBeInTheDocument();
+        expect(screen.queryByText('meeting-note')).not.toBeInTheDocument();
+    });
+    it('filters skills with available updates and sorts them first', async () => {
+        const { SkillPanel } = await import('../SkillPanel');
+        render(_jsx(SkillPanel, { isOpen: true, onClose: vi.fn() }));
+        await waitFor(() => {
+            expect(screen.getByText('daily-report')).toBeInTheDocument();
+        });
+        expect(screen.getAllByText('Update available').length).toBeGreaterThan(0);
+        const cards = screen.getAllByText(/daily-report|meeting-note/);
+        expect(cards[0]).toHaveTextContent('daily-report');
+        fireEvent.change(screen.getByRole('combobox', { name: 'Update filter' }), {
+            target: { value: 'update-available' },
+        });
+        expect(screen.getByText('daily-report')).toBeInTheDocument();
+        expect(screen.queryByText('meeting-note')).not.toBeInTheDocument();
+    });
+    it('refreshes an installed skill from its card action', async () => {
+        const { SkillPanel } = await import('../SkillPanel');
+        render(_jsx(SkillPanel, { isOpen: true, onClose: vi.fn() }));
+        await waitFor(() => {
+            expect(screen.getByText('daily-report')).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Update skill' }));
+        await waitFor(() => {
+            expect(invoke).toHaveBeenCalledWith('skill:update', { name: 'daily-report' });
+        });
+        expect(screen.getByText('Skill refreshed')).toBeInTheDocument();
     });
 });

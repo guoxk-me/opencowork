@@ -1,0 +1,26 @@
+id: benchmark-desktop-file-dialog-recovery
+name: Desktop File Dialog Recovery
+description: Recover from a missing file dialog or failed file selection on the desktop target.
+category: recovery-scenario
+prompt: Use the desktop target, handle a missing file dialog or failed file picker interaction, recover by reopening the flow, and confirm the task completed successfully.
+expectedOutcome:
+  successKeywords:
+    - file
+    - dialog
+    - recovered
+    - completed
+  minArtifacts: 1
+initialState:
+  initialUrl: about:blank
+executionConfig:
+  executionMode: visual
+  executionTargetKind: desktop
+  maxTurns: 8
+  adapterMode: chat-structured
+tags:
+  - desktop
+  - recovery
+  - file-dialog
+  - p4
+createdAt: 1710000000000
+updatedAt: 1710000000000

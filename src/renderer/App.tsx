@@ -145,6 +145,9 @@ function App() {
       setVisualApprovalRequest({
         runId: event?.runId || event?.handleId || event?.data?.runId,
         reason: event?.error?.message || 'Approval required before executing visual actions',
+        actionRiskReasons: pendingApproval?.audit?.actionRiskReasons || [],
+        matchedIntentKeywords: pendingApproval?.audit?.matchedIntentKeywords || [],
+        executionTarget: pendingApproval?.taskContext?.executionTarget,
         actions: pendingApproval?.actions || [],
         taskDescription: pendingApproval?.taskContext?.task,
         adapterMode: event?.adapterMode,

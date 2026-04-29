@@ -1,0 +1,27 @@
+id: benchmark-desktop-browser-reference-note
+name: Desktop Browser Reference Note
+description: Verify a browser-to-desktop handoff where browser research is captured into a desktop note.
+category: multi-step
+prompt: Open the reference page in the browser, switch to the desktop target, write a short note using the browser findings, then return to the browser and confirm the handoff is complete.
+expectedOutcome:
+  successKeywords:
+    - browser
+    - desktop
+    - note
+    - handoff
+    - complete
+  minArtifacts: 1
+initialState:
+  initialUrl: https://example.com/reference
+executionConfig:
+  executionMode: hybrid
+  executionTargetKind: desktop
+  maxTurns: 10
+  adapterMode: responses-computer
+tags:
+  - desktop
+  - browser
+  - hybrid
+  - p4
+createdAt: 1710000000000
+updatedAt: 1710000000000

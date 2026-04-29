@@ -22,6 +22,17 @@ export interface TaskArtifact {
   metadata?: Record<string, unknown>;
 }
 
+export interface ActionContract {
+  supportedActions?: string[];
+  supportedOperations?: string[];
+  notes?: string[];
+  workflowSemantics?: Array<{
+    action: string;
+    summary: string;
+    examples?: string[];
+  }>;
+}
+
 export interface TaskResultError {
   code: string;
   message: string;
@@ -34,6 +45,7 @@ export interface TaskResult {
   structuredData?: unknown;
   artifacts: TaskArtifact[];
   rawOutput?: unknown;
+  actionContract?: ActionContract;
   error?: TaskResultError;
   reusable: boolean;
   completedAt: number;
@@ -80,6 +92,15 @@ export interface TaskVisualProviderSelection {
   adapterMode: 'chat-structured' | 'responses-computer';
   capabilities?: TaskVisualCapabilitySnapshot;
   signals?: TaskVisualProviderSignals;
+}
+
+export type TaskExecutionTargetKind = 'browser' | 'desktop' | 'hybrid';
+
+export type TaskExecutionEnvironment = 'playwright' | 'vm' | 'container' | 'native-bridge';
+
+export interface TaskExecutionTargetSnapshot {
+  kind: TaskExecutionTargetKind;
+  environment: TaskExecutionEnvironment;
 }
 
 export interface TaskTemplateInputField {

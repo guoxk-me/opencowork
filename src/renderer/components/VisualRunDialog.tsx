@@ -60,6 +60,9 @@ export function VisualRunDialog({ onClose }: VisualRunDialogProps) {
         updateTaskStatus('waiting_confirm');
         setVisualApprovalRequest({
           reason: payload.error?.message || t('visualRun.approvalRequired'),
+          actionRiskReasons: payload.pendingApproval?.audit?.actionRiskReasons || [],
+          matchedIntentKeywords: payload.pendingApproval?.audit?.matchedIntentKeywords || [],
+          executionTarget: payload.pendingApproval?.taskContext?.executionTarget,
           actions: payload.pendingApproval.actions || [],
           taskDescription: payload.pendingApproval.taskContext?.task || taskDescription,
           adapterMode,
@@ -79,6 +82,7 @@ export function VisualRunDialog({ onClose }: VisualRunDialogProps) {
           summary,
           artifacts: [],
           rawOutput: payload,
+          actionContract: payload.actionContract,
           reusable: false,
           completedAt: Date.now(),
         });

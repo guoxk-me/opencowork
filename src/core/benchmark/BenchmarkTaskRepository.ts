@@ -84,6 +84,10 @@ function normalizeExecutionConfig(value: unknown): BenchmarkTaskExecutionConfig 
   if (executionMode === 'dom' || executionMode === 'visual' || executionMode === 'hybrid') {
     executionConfig.executionMode = executionMode;
   }
+  const executionTargetKind = value.executionTargetKind;
+  if (executionTargetKind === 'browser' || executionTargetKind === 'desktop' || executionTargetKind === 'hybrid') {
+    executionConfig.executionTargetKind = executionTargetKind;
+  }
   if (typeof value.maxTurns === 'number') {
     executionConfig.maxTurns = value.maxTurns;
   }

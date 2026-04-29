@@ -37,4 +37,20 @@ describe('BenchmarkSuiteRepository', () => {
         ]);
         expect(repository.getById('suite-recovery')?.name).toBe('Recovery Suite');
     });
+    it('loads the checked-in P4 desktop suite', () => {
+        const repository = new BenchmarkSuiteRepository(path.join(process.cwd(), 'src', 'benchmark-suites'));
+        expect(repository.getById('suite-p4-desktop-smoke')).toMatchObject({
+            benchmarkIds: [
+                'benchmark-desktop-notes-smoke',
+                'benchmark-desktop-browser-handoff',
+                'benchmark-desktop-browser-reference-note',
+                'benchmark-desktop-approval-recovery',
+                'benchmark-desktop-browser-finish',
+                'benchmark-desktop-focus-recovery',
+                'benchmark-desktop-file-dialog-recovery',
+                'benchmark-desktop-upload-recovery',
+                'benchmark-desktop-download-rename-upload',
+            ],
+        });
+    });
 });

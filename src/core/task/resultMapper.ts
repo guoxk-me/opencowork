@@ -1,8 +1,10 @@
-import { TaskArtifact, TaskResult, TaskResultError, createTaskEntityId } from './types';
+import { ActionContract, TaskArtifact, TaskResult, TaskResultError, createTaskEntityId } from './types';
+import { normalizeActionContract } from './actionContract';
 
 interface AgentLikeResult {
   success: boolean;
   output?: unknown;
+  actionContract?: unknown;
   error?: string;
   finalMessage?: string;
   steps?: Array<{
@@ -287,15 +289,17 @@ function collectVisualMetrics(agentResult: AgentLikeResult): VisualMetricsEntry[
 function buildRawOutput(
   output: unknown,
   visualTrace: VisualTraceEntry[],
-  visualMetrics: VisualMetricsEntry[]
+  visualMetrics: VisualMetricsEntry[],
+  actionContract?: ActionContract
 ): unknown {
-  if (visualTrace.length === 0 && visualMetrics.length === 0) {
+  if (visualTrace.length === 0 && visualMetrics.length === 0 && !actionContract) {
     return output;
   }
 
   if (output && typeof output === 'object' && !Array.isArray(output)) {
     return {
       ...(output as Record<string, unknown>),
+      ...(actionContract ? { actionContract } : {}),
       visualTrace,
       visualMetrics,
     };
@@ -303,6 +307,7 @@ function buildRawOutput(
 
   return {
     value: output,
+    ...(actionContract ? { actionContract } : {}),
     visualTrace,
     visualMetrics,
   };
@@ -313,6 +318,7 @@ export function mapAgentResultToTaskResult(agentResult: AgentLikeResult): TaskRe
   const structuredData = deriveStructuredData(agentResult.output);
   const visualTrace = collectVisualTrace(agentResult);
   const visualMetrics = collectVisualMetrics(agentResult);
+  const actionContract = normalizeActionContract(agentResult.actionContract);
   const summary =
     agentResult.finalMessage ||
     (typeof agentResult.output === 'string' ? agentResult.output : '') ||
@@ -323,7 +329,8 @@ export function mapAgentResultToTaskResult(agentResult: AgentLikeResult): TaskRe
     summary,
     structuredData,
     artifacts: buildStructuredArtifacts(summary, agentResult.output),
-    rawOutput: buildRawOutput(agentResult.output, visualTrace, visualMetrics),
+    rawOutput: buildRawOutput(agentResult.output, visualTrace, visualMetrics, actionContract),
+    actionContract,
     error: agentResult.success ? undefined : createTaskResultError(agentResult.error || '任务执行失败'),
     reusable: !!agentResult.success,
     completedAt,

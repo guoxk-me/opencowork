@@ -49,11 +49,24 @@ class StubAdapter implements VisualModelAdapter {
 class StubBrowserExecutionAdapter implements BrowserExecutionAdapter {
   private observationQueue: VisualObservation[] = [];
   private observationCount = 0;
+  private readonly executionResult: ActionExecutionResult;
+  private readonly executionTarget: { kind: 'browser' | 'desktop' | 'hybrid'; environment: 'playwright' | 'vm' | 'container' | 'native-bridge' };
 
   executeActions = vi.fn(async (actions) => ({
     success: true,
     executed: actions,
   }));
+
+  constructor(
+    executionResult: ActionExecutionResult,
+    executionTarget: { kind: 'browser' | 'desktop' | 'hybrid'; environment: 'playwright' | 'vm' | 'container' | 'native-bridge' } = {
+      kind: 'browser',
+      environment: 'playwright',
+    }
+  ) {
+    this.executionResult = executionResult;
+    this.executionTarget = executionTarget;
+  }
 
   setObservations(observations: VisualObservation[]): void {
     this.observationQueue = [...observations];
@@ -83,6 +96,17 @@ class StubBrowserExecutionAdapter implements BrowserExecutionAdapter {
       title: 'Example',
     };
   }
+
+  async getExecutionTarget(): Promise<{ kind: 'browser' | 'desktop' | 'hybrid'; environment: 'playwright' | 'vm' | 'container' | 'native-bridge' }> {
+    return this.executionTarget;
+  }
+
+  async getExecutionContext(): Promise<Record<string, unknown>> {
+    return {
+      url: 'https://example.test',
+      title: 'Example',
+    };
+  }
 }
 
 class StubApprovalGate implements ApprovalGate {
@@ -101,16 +125,72 @@ class StubApprovalGate implements ApprovalGate {
 }
 
 describe('ComputerUseRuntime', () => {
+  it('builds desktop-capable requests for vm targets', async () => {
+    let capturedRequest: VisualTurnRequest | null = null;
+    const adapter: VisualModelAdapter = {
+      getName: () => 'vm-smoke-adapter',
+      getCapabilities: () => ({
+        builtInComputerTool: false,
+        batchedActions: true,
+        nativeScreenshotRequest: false,
+        structuredOutput: true,
+        toolCalling: false,
+        supportsReasoningControl: false,
+      }),
+      createSession: async () => ({
+        sessionId: 'vm-smoke-session',
+        adapterMode: 'chat-structured',
+        model: 'stub-model',
+        capabilities: {
+          builtInComputerTool: false,
+          batchedActions: true,
+          nativeScreenshotRequest: false,
+          structuredOutput: true,
+          toolCalling: false,
+          supportsReasoningControl: false,
+        },
+      }),
+      runTurn: vi.fn(async (_session, request) => {
+        capturedRequest = request;
+        return {
+          status: 'completed',
+          finalMessage: 'VM smoke complete',
+        };
+      }),
+      destroySession: async () => {},
+    };
+
+    const browser = new StubBrowserExecutionAdapter({ success: true, executed: [] }, { kind: 'desktop', environment: 'vm' });
+    const runtime = new ComputerUseRuntime(adapter, browser, new StubApprovalGate(false));
+
+    const result = await runtime.runTask({
+      runId: 'run-vm-smoke',
+      task: 'Open the desktop notes app on the VM',
+      adapterSession: await adapter.createSession(),
+      maxTurns: 1,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.executionTarget).toEqual({ kind: 'desktop', environment: 'vm' });
+    expect(capturedRequest?.taskContext.executionTarget).toEqual({ kind: 'desktop', environment: 'vm' });
+    expect(capturedRequest?.allowedActions).toEqual(
+      expect.arrayContaining(['open_application', 'focus_window', 'open_file', 'save_file', 'upload_file', 'download_file'])
+    );
+  });
+
   it('returns pendingApproval when approval gate blocks the action batch', async () => {
     const adapter = new StubAdapter({
       status: 'actions_proposed',
-      actions: [{ type: 'click', x: 10, y: 20 }],
+      actions: [{ type: 'open_file', targetPath: '/tmp/report.csv' }],
     });
-    const browser = new StubBrowserExecutionAdapter();
+    const browser = new StubBrowserExecutionAdapter(
+      { success: true, executed: [] },
+      { kind: 'desktop', environment: 'native-bridge' }
+    );
     const runtime = new ComputerUseRuntime(
       adapter,
       browser,
-      new StubApprovalGate(true, { approved: false, reason: 'Need approval for click' })
+      new StubApprovalGate(true, { approved: false, reason: 'Need approval for file access' })
     );
 
     const result = await runtime.runTask({
@@ -124,6 +204,9 @@ describe('ComputerUseRuntime', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('APPROVAL_REQUIRED');
     expect(result.pendingApproval?.actions).toHaveLength(1);
+    expect(result.pendingApproval?.audit?.actionRiskReasons).toContain('contains high-impact desktop action: open_file');
+    expect(result.pendingApproval?.audit?.actionRiskReasons).toContain('contains desktop workflow action: open_file');
+    expect(result.pendingApproval?.audit?.actionRiskReasons).toContain('runs on native-bridge host desktop backend');
     expect(browser.executeActions).not.toHaveBeenCalled();
     expect(result.metrics?.approvalInterruptions).toBe(1);
     expect(result.metrics?.proposedActionCount).toBe(1);
@@ -560,6 +643,325 @@ describe('ComputerUseRuntime', () => {
         category: 'viewport',
         trigger: 'viewport-execution-failed',
         failedActions: ['scroll'],
+      },
+    ]);
+  });
+
+  it('uses desktop restart recovery for interaction failures on desktop targets', async () => {
+    const responses: VisualTurnResponse[] = [
+      {
+        status: 'actions_proposed',
+        actions: [{ type: 'click', x: 30, y: 30 }],
+      },
+      {
+        status: 'completed',
+        finalMessage: 'Recovered after desktop refocus',
+      },
+    ];
+
+    const adapter: VisualModelAdapter = {
+      getName: () => 'desktop-refocus-adapter',
+      getCapabilities: () => ({
+        builtInComputerTool: false,
+        batchedActions: true,
+        nativeScreenshotRequest: false,
+        structuredOutput: true,
+        toolCalling: false,
+        supportsReasoningControl: false,
+      }),
+      createSession: async () => ({
+        sessionId: 'desktop-refocus-session',
+        adapterMode: 'chat-structured',
+        model: 'stub-model',
+        capabilities: {
+          builtInComputerTool: false,
+          batchedActions: true,
+          nativeScreenshotRequest: false,
+          structuredOutput: true,
+          toolCalling: false,
+          supportsReasoningControl: false,
+        },
+      }),
+      runTurn: vi.fn(async () => responses.shift() || { status: 'failed', error: { code: 'EMPTY', message: 'No response', recoverable: false } }),
+      destroySession: async () => {},
+    };
+
+    const browser = new StubBrowserExecutionAdapter();
+    browser.executeActions = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        executed: [{ type: 'click', x: 30, y: 30 }],
+        error: {
+          code: 'ACTION_EXECUTION_FAILED',
+          message: 'Desktop window lost focus',
+          recoverable: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        executed: [{ type: 'wait', durationMs: 1500 }],
+      });
+    const restartSpy = vi.fn(async () => undefined);
+    (browser as unknown as { restart?: () => Promise<void> }).restart = restartSpy;
+
+    const desktopBrowser = new StubBrowserExecutionAdapter({ success: true, executed: [] }, { kind: 'desktop', environment: 'vm' });
+    desktopBrowser.executeActions = browser.executeActions;
+    (desktopBrowser as unknown as { restart?: () => Promise<void> }).restart = restartSpy;
+    expect(await desktopBrowser.getExecutionTarget()).toEqual({ kind: 'desktop', environment: 'vm' });
+
+    const runtime = new ComputerUseRuntime(adapter, desktopBrowser, new StubApprovalGate(false));
+
+    const result = await runtime.runTask({
+      runId: 'run-desktop-refocus',
+      task: 'Click the desktop button after focus is lost',
+      adapterSession: await adapter.createSession({} as any),
+      maxTurns: 2,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.metrics?.recoveryAttempts).toBe(1);
+    expect(restartSpy).toHaveBeenCalledTimes(1);
+    expect(result.metrics?.recoveryDetails).toMatchObject([
+      {
+        strategy: 'restart-and-reobserve',
+        category: 'window',
+        trigger: 'interaction-execution-failed',
+        failedActions: ['click'],
+      },
+    ]);
+  });
+
+  it('uses file dialog recovery for file actions on desktop targets', async () => {
+    const responses: VisualTurnResponse[] = [
+      {
+        status: 'actions_proposed',
+        actions: [{ type: 'open_file', targetPath: '/tmp/example.txt' }],
+      },
+      {
+        status: 'completed',
+        finalMessage: 'Recovered after file dialog reset',
+      },
+    ];
+
+    const adapter: VisualModelAdapter = {
+      getName: () => 'desktop-file-dialog-adapter',
+      getCapabilities: () => ({
+        builtInComputerTool: false,
+        batchedActions: true,
+        nativeScreenshotRequest: false,
+        structuredOutput: true,
+        toolCalling: false,
+        supportsReasoningControl: false,
+      }),
+      createSession: async () => ({
+        sessionId: 'desktop-file-dialog-session',
+        adapterMode: 'chat-structured',
+        model: 'stub-model',
+        capabilities: {
+          builtInComputerTool: false,
+          batchedActions: true,
+          nativeScreenshotRequest: false,
+          structuredOutput: true,
+          toolCalling: false,
+          supportsReasoningControl: false,
+        },
+      }),
+      runTurn: vi.fn(async () => responses.shift() || { status: 'failed', error: { code: 'EMPTY', message: 'No response', recoverable: false } }),
+      destroySession: async () => {},
+    };
+
+    const restartSpy = vi.fn(async () => undefined);
+    const browser = new StubBrowserExecutionAdapter({ success: true, executed: [] }, { kind: 'desktop', environment: 'container' });
+    browser.executeActions = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        executed: [{ type: 'open_file', targetPath: '/tmp/example.txt' }],
+        error: {
+          code: 'ACTION_EXECUTION_FAILED',
+          message: 'File dialog did not appear',
+          recoverable: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        executed: [{ type: 'wait', durationMs: 1500 }],
+      });
+    (browser as unknown as { restart?: () => Promise<void> }).restart = restartSpy;
+
+    const runtime = new ComputerUseRuntime(adapter, browser, new StubApprovalGate(false));
+
+    const result = await runtime.runTask({
+      runId: 'run-desktop-file-dialog',
+      task: 'Open the local file dialog and continue',
+      adapterSession: await adapter.createSession({} as any),
+      maxTurns: 2,
+    });
+
+    expect(result.success).toBe(true);
+    expect(restartSpy).toHaveBeenCalledTimes(1);
+    expect(result.metrics?.recoveryDetails).toMatchObject([
+      {
+        strategy: 'file-dialog-recover-and-reobserve',
+        category: 'file',
+        trigger: 'file-dialog-execution-failed',
+        failedActions: ['open_file'],
+      },
+    ]);
+  });
+
+  it('uses window focus recovery for focus window actions on desktop targets', async () => {
+    const responses: VisualTurnResponse[] = [
+      {
+        status: 'actions_proposed',
+        actions: [{ type: 'focus_window', windowTitle: 'Notes' }],
+      },
+      {
+        status: 'completed',
+        finalMessage: 'Recovered after window focus reset',
+      },
+    ];
+
+    const adapter: VisualModelAdapter = {
+      getName: () => 'desktop-window-focus-adapter',
+      getCapabilities: () => ({
+        builtInComputerTool: false,
+        batchedActions: true,
+        nativeScreenshotRequest: false,
+        structuredOutput: true,
+        toolCalling: false,
+        supportsReasoningControl: false,
+      }),
+      createSession: async () => ({
+        sessionId: 'desktop-window-focus-session',
+        adapterMode: 'chat-structured',
+        model: 'stub-model',
+        capabilities: {
+          builtInComputerTool: false,
+          batchedActions: true,
+          nativeScreenshotRequest: false,
+          structuredOutput: true,
+          toolCalling: false,
+          supportsReasoningControl: false,
+        },
+      }),
+      runTurn: vi.fn(async () => responses.shift() || { status: 'failed', error: { code: 'EMPTY', message: 'No response', recoverable: false } }),
+      destroySession: async () => {},
+    };
+
+    const restartSpy = vi.fn(async () => undefined);
+    const browser = new StubBrowserExecutionAdapter({ success: true, executed: [] }, { kind: 'desktop', environment: 'vm' });
+    browser.executeActions = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        executed: [{ type: 'focus_window', windowTitle: 'Notes' }],
+        error: {
+          code: 'ACTION_EXECUTION_FAILED',
+          message: 'Unable to focus Notes window',
+          recoverable: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        executed: [{ type: 'wait', durationMs: 1500 }],
+      });
+    (browser as unknown as { restart?: () => Promise<void> }).restart = restartSpy;
+
+    const runtime = new ComputerUseRuntime(adapter, browser, new StubApprovalGate(false));
+
+    const result = await runtime.runTask({
+      runId: 'run-desktop-window-focus',
+      task: 'Focus the Notes window and continue',
+      adapterSession: await adapter.createSession({} as any),
+      maxTurns: 2,
+    });
+
+    expect(result.success).toBe(true);
+    expect(restartSpy).toHaveBeenCalledTimes(0);
+    expect(result.metrics?.recoveryDetails).toMatchObject([
+      {
+        strategy: 'refocus-and-reobserve',
+        category: 'window',
+        trigger: 'window-focus-execution-failed',
+        failedActions: ['focus_window'],
+      },
+    ]);
+  });
+
+  it('uses refocus recovery for input actions on desktop targets', async () => {
+    const responses: VisualTurnResponse[] = [
+      {
+        status: 'actions_proposed',
+        actions: [{ type: 'type', text: 'Hello world' }],
+      },
+      {
+        status: 'completed',
+        finalMessage: 'Recovered after input refocus',
+      },
+    ];
+
+    const adapter: VisualModelAdapter = {
+      getName: () => 'desktop-input-adapter',
+      getCapabilities: () => ({
+        builtInComputerTool: false,
+        batchedActions: true,
+        nativeScreenshotRequest: false,
+        structuredOutput: true,
+        toolCalling: false,
+        supportsReasoningControl: false,
+      }),
+      createSession: async () => ({
+        sessionId: 'desktop-input-session',
+        adapterMode: 'chat-structured',
+        model: 'stub-model',
+        capabilities: {
+          builtInComputerTool: false,
+          batchedActions: true,
+          nativeScreenshotRequest: false,
+          structuredOutput: true,
+          toolCalling: false,
+          supportsReasoningControl: false,
+        },
+      }),
+      runTurn: vi.fn(async () => responses.shift() || { status: 'failed', error: { code: 'EMPTY', message: 'No response', recoverable: false } }),
+      destroySession: async () => {},
+    };
+
+    const browser = new StubBrowserExecutionAdapter({ success: true, executed: [] }, { kind: 'desktop', environment: 'vm' });
+    browser.executeActions = vi
+      .fn()
+      .mockResolvedValueOnce({
+        success: false,
+        executed: [{ type: 'type', text: 'Hello world' }],
+        error: {
+          code: 'ACTION_EXECUTION_FAILED',
+          message: 'Typing did not register',
+          recoverable: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        executed: [{ type: 'wait', durationMs: 1500 }],
+      });
+
+    const runtime = new ComputerUseRuntime(adapter, browser, new StubApprovalGate(false));
+
+    const result = await runtime.runTask({
+      runId: 'run-desktop-input',
+      task: 'Type into the desktop editor and continue',
+      adapterSession: await adapter.createSession({} as any),
+      maxTurns: 2,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.metrics?.recoveryDetails).toMatchObject([
+      {
+        strategy: 'refocus-and-reobserve',
+        category: 'input',
+        trigger: 'input-execution-failed',
+        failedActions: ['type'],
       },
     ]);
   });

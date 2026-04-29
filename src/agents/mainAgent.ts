@@ -1569,6 +1569,7 @@ export class MainAgent {
             summary: taskResult.summary,
             artifacts: taskResult.artifacts,
             rawOutput: taskResult.rawOutput,
+            actionContract: taskResult.actionContract,
             structuredData: taskResult.structuredData,
             reusable: taskResult.reusable,
           });

@@ -2,6 +2,19 @@
 
 All notable changes to OpenCowork are documented in this file.
 
+## v0.12.7 - 2026-04-30
+
+### Release focus
+
+Close the current desktop-computer-use slice by tightening VM as the primary smoke path, surfacing execution-target context in approvals, and refreshing the P4 desktop smoke suite.
+
+### Highlights
+
+- Added desktop approval audit context to the visual approval dialog so execution-target metadata is visible during approval.
+- Added a VM-focused runtime smoke test that verifies desktop-capable requests include the correct execution target and allowed actions.
+- Added a VM-specific desktop smoke benchmark and included it in the P4 desktop smoke suite.
+- Updated the P4 delivery checklist to match the current desktop approval, runtime, and benchmark state.
+
 ## Unreleased
 
 ### Focus

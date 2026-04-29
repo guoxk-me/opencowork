@@ -5,7 +5,13 @@ import {
   selectBestVisualProvider,
   VisualProviderDescriptor,
 } from '../visual/visualProviderRegistry';
-import { TaskResult, TaskSource, TaskVisualProviderSelection } from './types';
+import {
+  TaskExecutionTargetKind,
+  TaskExecutionTargetSnapshot,
+  TaskResult,
+  TaskSource,
+  TaskVisualProviderSelection,
+} from './types';
 
 export type TaskExecutionMode = 'dom' | 'visual' | 'hybrid';
 
@@ -15,6 +21,7 @@ export interface TaskExecutionRoute {
   reason: string;
   explicit: boolean;
   source: TaskSource;
+  executionTarget: TaskExecutionTargetSnapshot;
   visualProviderRequirements?: ProviderRoutingRequirements | null;
   visualProvider?: TaskVisualProviderSelection | null;
 }
@@ -23,6 +30,7 @@ export interface ResolveTaskExecutionRouteInput {
   task: string;
   source: TaskSource;
   executionMode?: TaskExecutionMode;
+  executionTargetKind?: TaskExecutionTargetKind;
   hasPriorDomFailure?: boolean;
   isVisualTask?: boolean;
   requiresStrictExtraction?: boolean;
@@ -31,6 +39,30 @@ export interface ResolveTaskExecutionRouteInput {
 }
 
 const hybridToolRouter = new HybridToolRouter();
+
+function deriveExecutionTarget(
+  executionMode: TaskExecutionMode,
+  executionTargetKind?: TaskExecutionTargetKind
+): TaskExecutionTargetSnapshot {
+  if (executionTargetKind === 'desktop') {
+    return {
+      kind: 'desktop',
+      environment: 'vm',
+    };
+  }
+
+  if (executionTargetKind === 'hybrid' || executionMode === 'hybrid') {
+    return {
+      kind: 'hybrid',
+      environment: 'playwright',
+    };
+  }
+
+  return {
+    kind: 'browser',
+    environment: 'playwright',
+  };
+}
 
 function deriveVisualProviderRequirements(
   routeMode: HybridRouteDecision['mode'],
@@ -112,20 +144,33 @@ function resolveVisualProvider(
 export function resolveTaskExecutionRoute(
   input: ResolveTaskExecutionRouteInput
 ): TaskExecutionRoute {
+  const isDesktopTarget = input.executionTargetKind === 'desktop';
+
   if (input.executionMode) {
-    const routeMode = input.executionMode === 'dom' ? 'dom' : input.executionMode === 'hybrid' ? 'hybrid' : 'cua';
-    const visualProviderRequirements =
-      input.executionMode === 'dom' ? null : deriveVisualProviderRequirements(routeMode, input);
+    let routeMode: TaskExecutionRoute['routeMode'] =
+      input.executionMode === 'dom' ? 'dom' : input.executionMode === 'hybrid' ? 'hybrid' : 'cua';
+    let executionMode: TaskExecutionMode = input.executionMode;
+
+    if (isDesktopTarget && input.executionMode === 'dom') {
+      routeMode = 'cua';
+      executionMode = 'visual';
+    }
+
+    const visualProviderRequirements: ProviderRoutingRequirements | null =
+      executionMode === 'dom' ? null : deriveVisualProviderRequirements(routeMode, input);
 
     return {
       routeMode,
-      executionMode: input.executionMode,
-      reason: `Explicit execution mode provided: ${input.executionMode}`,
+      executionMode,
+      reason: input.executionTargetKind
+        ? `Explicit execution mode provided: ${input.executionMode}; execution target kind: ${input.executionTargetKind}`
+        : `Explicit execution mode provided: ${input.executionMode}`,
       explicit: true,
       source: input.source,
+      executionTarget: deriveExecutionTarget(executionMode, input.executionTargetKind),
       visualProviderRequirements,
       visualProvider:
-        input.executionMode === 'dom'
+        executionMode === 'dom'
           ? null
           : resolveVisualProvider(input.visualProviders, visualProviderRequirements || undefined),
     };
@@ -137,18 +182,29 @@ export function resolveTaskExecutionRoute(
     isVisualTask: input.isVisualTask,
     requiresStrictExtraction: input.requiresStrictExtraction,
   });
-  const visualProviderRequirements =
-    decision.mode === 'dom' ? null : deriveVisualProviderRequirements(decision.mode, input);
+  const visualProviderRequirements: ProviderRoutingRequirements | null =
+    (isDesktopTarget && decision.mode === 'dom')
+      ? deriveVisualProviderRequirements('cua', input)
+      : decision.mode === 'dom'
+        ? null
+        : deriveVisualProviderRequirements(decision.mode, input);
+  const routeMode: TaskExecutionRoute['routeMode'] = isDesktopTarget && decision.mode === 'dom' ? 'cua' : decision.mode;
+  const executionMode: TaskExecutionMode = isDesktopTarget && decision.mode === 'dom'
+    ? 'visual'
+    : mapRouteModeToExecutionMode(decision.mode);
 
   return {
-    routeMode: decision.mode,
-    executionMode: mapRouteModeToExecutionMode(decision.mode),
-    reason: decision.reason,
+    routeMode,
+    executionMode,
+    reason: input.executionTargetKind
+      ? `${decision.reason}; execution target kind: ${input.executionTargetKind}`
+      : decision.reason,
     explicit: false,
     source: input.source,
+    executionTarget: deriveExecutionTarget(executionMode, input.executionTargetKind),
     visualProviderRequirements,
     visualProvider:
-      decision.mode === 'dom'
+      routeMode === 'dom'
         ? null
         : resolveVisualProvider(input.visualProviders, visualProviderRequirements || undefined),
   };

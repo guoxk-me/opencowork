@@ -34,7 +34,13 @@ export type UIActionType =
   | 'keypress'
   | 'type'
   | 'wait'
-  | 'screenshot';
+  | 'screenshot'
+  | 'open_application'
+  | 'focus_window'
+  | 'open_file'
+  | 'save_file'
+  | 'upload_file'
+  | 'download_file';
 
 export interface UIAction {
   type: UIActionType;
@@ -42,6 +48,10 @@ export interface UIAction {
   y?: number;
   button?: 'left' | 'right' | 'middle';
   text?: string;
+  targetPath?: string;
+  applicationPath?: string;
+  uri?: string;
+  windowTitle?: string;
   keys?: string[];
   path?: Array<[number, number]> | Array<{ x: number; y: number }>;
   scrollX?: number;
@@ -53,6 +63,10 @@ export interface VisualTaskContext {
   task: string;
   instruction?: string;
   page: VisualPageContext;
+  executionTarget?: {
+    kind: 'browser' | 'desktop' | 'hybrid';
+    environment: 'playwright' | 'vm' | 'container' | 'native-bridge';
+  };
   previousActions?: UIAction[];
   previousObservation?: string;
   approvalPolicy?: ApprovalPolicySnapshot;
@@ -134,12 +148,14 @@ export interface VisualExecutionTurn {
 
 export interface RecoveryDetail {
   strategy: string;
-  category: 'timing' | 'viewport' | 'strategy' | 'verification' | 'generic';
+  category: 'timing' | 'viewport' | 'window' | 'file' | 'input' | 'strategy' | 'verification' | 'generic';
   trigger?:
     | 'verification-no-effect'
     | 'interaction-execution-failed'
     | 'input-execution-failed'
     | 'viewport-execution-failed'
+    | 'window-focus-execution-failed'
+    | 'file-dialog-execution-failed'
     | 'generic-execution-failed';
   errorCode?: string;
   errorMessage?: string;
@@ -160,6 +176,10 @@ export interface ComputerUseRunResult {
   success: boolean;
   finalMessage?: string;
   turns: VisualExecutionTurn[];
+  executionTarget?: {
+    kind: 'browser' | 'desktop' | 'hybrid';
+    environment: 'playwright' | 'vm' | 'container' | 'native-bridge';
+  };
   error?: VisualTurnError;
   pendingApproval?: PendingApproval;
   metrics?: {

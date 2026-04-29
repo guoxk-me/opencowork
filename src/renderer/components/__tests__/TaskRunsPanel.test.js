@@ -53,6 +53,13 @@ const invoke = vi.fn(async (channel) => {
                     reusable: true,
                     completedAt: 1710000005000,
                     rawOutput: {
+                        actionContract: {
+                            supportedActions: ['open_application', 'focus_window'],
+                            workflowSemantics: [
+                                { action: 'open_application', summary: 'Launch a desktop app' },
+                                { action: 'focus_window', summary: 'Bring a window to the foreground' },
+                            ],
+                        },
                         visualTrace: [
                             {
                                 source: 'step',
@@ -132,6 +139,8 @@ describe('TaskRunsPanel', () => {
         expect(screen.getAllByText((_, element) => element?.textContent?.includes('Responses Computer') ?? false).length).toBeGreaterThan(0);
         expect(screen.getAllByText((_, element) => element?.textContent?.replace(/\s+/g, ' ').includes('score: 92') ?? false).length).toBeGreaterThan(0);
         expect(screen.getAllByText('highest completion').length).toBeGreaterThan(0);
+        expect(screen.getByText('open_application')).toBeInTheDocument();
+        expect(screen.getByText('Launch a desktop app')).toBeInTheDocument();
         expect(screen.getByText('1')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'template:template-1' }));
         expect(window.dispatchEvent).toHaveBeenCalledWith(expect.any(CustomEvent));

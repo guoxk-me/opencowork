@@ -45,6 +45,7 @@ describe('BenchmarkTaskRepository', () => {
             },
             executionConfig: {
                 executionMode: 'hybrid',
+                executionTargetKind: 'desktop',
                 adapterMode: 'responses-computer',
             },
             tags: ['hybrid'],
@@ -54,6 +55,7 @@ describe('BenchmarkTaskRepository', () => {
         expect(tasks).toHaveLength(2);
         expect(repository.getById('benchmark-search')?.executionConfig?.maxTurns).toBe(5);
         expect(repository.getById('benchmark-form')?.executionConfig?.adapterMode).toBe('responses-computer');
+        expect(repository.getById('benchmark-form')?.executionConfig?.executionTargetKind).toBe('desktop');
         expect(tasks[0].id).toBe('benchmark-form');
         expect(tasks[1].id).toBe('benchmark-search');
     });
@@ -88,5 +90,62 @@ describe('BenchmarkTaskRepository', () => {
         expect(tasks).toHaveLength(1);
         expect(tasks[0].id).toBe('benchmark-valid');
         expect(repository.getById('benchmark-invalid')).toBeNull();
+    });
+    it('loads the checked-in desktop benchmark definitions', () => {
+        const repository = new BenchmarkTaskRepository(path.join(process.cwd(), 'src', 'benchmarks'));
+        expect(repository.getById('benchmark-desktop-notes-smoke')).toMatchObject({
+            executionConfig: {
+                executionMode: 'visual',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-browser-handoff')).toMatchObject({
+            executionConfig: {
+                executionMode: 'hybrid',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-browser-reference-note')).toMatchObject({
+            executionConfig: {
+                executionMode: 'hybrid',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-approval-recovery')).toMatchObject({
+            executionConfig: {
+                executionMode: 'visual',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-browser-finish')).toMatchObject({
+            executionConfig: {
+                executionMode: 'hybrid',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-focus-recovery')).toMatchObject({
+            executionConfig: {
+                executionMode: 'visual',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-file-dialog-recovery')).toMatchObject({
+            executionConfig: {
+                executionMode: 'visual',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-upload-recovery')).toMatchObject({
+            executionConfig: {
+                executionMode: 'visual',
+                executionTargetKind: 'desktop',
+            },
+        });
+        expect(repository.getById('benchmark-desktop-download-rename-upload')).toMatchObject({
+            executionConfig: {
+                executionMode: 'hybrid',
+                executionTargetKind: 'desktop',
+            },
+        });
     });
 });

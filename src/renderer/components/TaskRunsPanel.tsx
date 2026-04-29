@@ -7,47 +7,22 @@ import { useTaskStore } from '../stores/taskStore';
 import { useTranslation } from '../i18n/useTranslation';
 import RelationBadge from './RelationBadge';
 import ArtifactViewer from './ArtifactViewer';
-import { SkillCandidateCard, SkillCandidateViewModel } from './SkillCandidateCard';
+import { SkillCandidateCard } from './SkillCandidateCard';
 import { extractVisualTraceSummary } from '../utils/visualTrace';
+import { extractActionContract } from '../utils/actionContract';
 import {
   listVisualProviderCapabilities,
   resolveVisualProviderLabel,
   resolveVisualProviderSelection,
 } from '../../core/visual/visualProviderMetadata';
+import { extractExecutionTarget, extractSkillCandidate } from '../utils/resultFields';
+import { parseLifecycleDetails } from '../utils/taskLifecycle';
 
 interface TaskRunDetails {
   run: TaskRun;
   result: TaskResult | null;
   template: TaskTemplate | null;
   history: TaskHistoryRecord | null;
-}
-
-interface LifecycleDetails {
-  approval: null | {
-    pending?: boolean;
-    approved?: boolean;
-    requestedAt?: number;
-    approvedAt?: number;
-    reason?: string;
-  };
-  takeover: null | {
-    active?: boolean;
-    interrupted?: boolean;
-    interruptReason?: string;
-    interruptedAt?: number;
-    resumedAt?: number;
-    restoredAt?: number;
-  };
-}
-
-function parseLifecycleDetails(metadata: Record<string, unknown> | undefined): LifecycleDetails {
-  const approval = metadata?.approval;
-  const takeover = metadata?.takeover;
-
-  return {
-    approval: approval && typeof approval === 'object' ? (approval as LifecycleDetails['approval']) : null,
-    takeover: takeover && typeof takeover === 'object' ? (takeover as LifecycleDetails['takeover']) : null,
-  };
 }
 
 interface TaskRunsPanelProps {
@@ -160,7 +135,7 @@ export function TaskRunsPanel({ isOpen, onClose }: TaskRunsPanelProps) {
     if (selectedDetails.template) {
       await runTemplate(
         selectedDetails.template.id,
-        (selectedDetails.run.input?.params as Record<string, unknown>) || undefined
+        selectedDetails.run.input?.params
       );
       return;
     }
@@ -185,7 +160,7 @@ export function TaskRunsPanel({ isOpen, onClose }: TaskRunsPanelProps) {
         name: selectedDetails.run.title,
         description: selectedDetails.history?.result?.summary || selectedDetails.run.title,
         templateId: selectedDetails.template.id,
-        input: (selectedDetails.run.input?.params as Record<string, unknown>) || undefined,
+        input: selectedDetails.run.input?.params,
       });
       return;
     }
@@ -207,9 +182,7 @@ export function TaskRunsPanel({ isOpen, onClose }: TaskRunsPanelProps) {
 
   const selectedResult = selectedDetails?.result || null;
   const historyResult = selectedDetails?.history?.result || null;
-  const lifecycleDetails = parseLifecycleDetails(
-    (selectedDetails?.run.metadata as Record<string, unknown> | undefined) || undefined
-  );
+  const lifecycleDetails = parseLifecycleDetails(selectedDetails?.run.metadata);
   const resultSummary = selectedResult?.summary || historyResult?.summary || '';
   const resultError = selectedResult?.error?.message || historyResult?.taskError?.message || '';
   const resultStructuredData = selectedResult?.structuredData ?? historyResult?.structuredData;
@@ -219,10 +192,9 @@ export function TaskRunsPanel({ isOpen, onClose }: TaskRunsPanelProps) {
   const selectedVisualProviderLabel = resolveVisualProviderLabel(selectedDetails?.run.metadata);
   const selectedVisualProviderSelection = resolveVisualProviderSelection(selectedDetails?.run.metadata);
   const selectedVisualProviderCapabilities = listVisualProviderCapabilities(selectedDetails?.run.metadata);
-  const skillCandidate =
-    resultRawOutput && typeof resultRawOutput === 'object' && !Array.isArray(resultRawOutput)
-      ? ((resultRawOutput as Record<string, unknown>).skillCandidate as SkillCandidateViewModel | undefined)
-      : undefined;
+  const selectedExecutionTarget = extractExecutionTarget(selectedDetails?.run.metadata);
+  const selectedActionContract = extractActionContract(selectedResult || historyResult || undefined);
+  const skillCandidate = extractSkillCandidate(resultRawOutput);
 
   const filteredRuns = runs.filter((run) => {
     const matchesKeyword =
@@ -399,6 +371,33 @@ export function TaskRunsPanel({ isOpen, onClose }: TaskRunsPanelProps) {
                           <div className="text-xs text-text-muted">{t('taskPanels.status')}</div>
                     <div className="mt-1 text-white">{selectedDetails.run.status}</div>
                   </div>
+                  {selectedExecutionTarget && (
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">
+                      <div className="text-xs text-text-muted">execution target</div>
+                      <div className="mt-1 text-white">
+                        {selectedExecutionTarget.kind || 'browser'} · {selectedExecutionTarget.environment || 'playwright'}
+                      </div>
+                    </div>
+                  )}
+                  {selectedActionContract && (
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">
+                      <div className="text-xs text-text-muted">desktop contract</div>
+                      <div className="mt-1 text-white">
+                        {selectedActionContract.supportedActions?.join(', ') || 'none'}
+                      </div>
+                      {selectedActionContract.workflowSemantics && selectedActionContract.workflowSemantics.length > 0 && (
+                        <div className="mt-2 space-y-1 text-xs text-text-secondary">
+                          {selectedActionContract.workflowSemantics.slice(0, 3).map((semantic) => (
+                            <div key={semantic.action}>
+                              <span className="text-text-muted">{semantic.action}</span>
+                              <span className="mx-1">·</span>
+                              <span>{semantic.summary}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {selectedVisualProviderLabel && (
                     <div className="rounded-lg border border-border bg-background px-3 py-2">
                       <div className="text-xs text-text-muted">{t('taskPanels.visualProvider', 'Visual provider')}</div>

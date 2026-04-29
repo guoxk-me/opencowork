@@ -1,0 +1,28 @@
+id: benchmark-desktop-browser-finish
+name: Desktop Browser Finish
+description: Start the task in the browser and finish the final step on the desktop target.
+category: multi-step
+prompt: Research the request in the browser, switch to the desktop target to complete the final local step, and confirm the workflow finished cleanly.
+expectedOutcome:
+  successKeywords:
+    - browser
+    - desktop
+    - final
+    - finished
+    - cleanly
+  minArtifacts: 1
+initialState:
+  initialUrl: https://example.com/research
+executionConfig:
+  executionMode: hybrid
+  executionTargetKind: desktop
+  maxTurns: 10
+  adapterMode: chat-structured
+tags:
+  - desktop
+  - browser
+  - hybrid
+  - finish
+  - p4
+createdAt: 1710000000000
+updatedAt: 1710000000000

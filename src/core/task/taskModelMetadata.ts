@@ -43,6 +43,7 @@ export function buildTaskExecutionMetadata(input: BuildTaskExecutionMetadataInpu
 
   if (input.taskRouting) {
     metadata.taskRouting = input.taskRouting;
+    metadata.executionTarget = input.taskRouting.executionTarget;
     if (input.taskRouting.visualProviderRequirements) {
       metadata.visualProviderRequirements = input.taskRouting.visualProviderRequirements;
     }

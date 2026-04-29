@@ -1,4 +1,4 @@
-import { TaskArtifact, TaskResultError, TaskSource } from '../core/task/types';
+import { ActionContract, TaskArtifact, TaskResultError, TaskSource } from '../core/task/types';
 
 export interface TaskStep {
   id: string;
@@ -18,6 +18,7 @@ export interface TaskResult {
   summary?: string;
   artifacts?: TaskArtifact[];
   rawOutput?: unknown;
+  actionContract?: ActionContract;
   structuredData?: unknown;
   taskError?: TaskResultError;
   reusable?: boolean;

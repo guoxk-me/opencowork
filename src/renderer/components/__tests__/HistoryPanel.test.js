@@ -35,6 +35,13 @@ const historyTasks = [
                 },
             ],
             rawOutput: {
+                actionContract: {
+                    supportedActions: ['open_application', 'save_file'],
+                    workflowSemantics: [
+                        { action: 'open_application', summary: 'Launch a desktop app' },
+                        { action: 'save_file', summary: 'Write results to disk' },
+                    ],
+                },
                 visualTrace: [
                     {
                         source: 'step',
@@ -139,6 +146,7 @@ describe('HistoryPanel', () => {
         expect(screen.getAllByText((_, element) => element?.textContent?.includes('Responses Computer') ?? false).length).toBeGreaterThan(0);
         expect(screen.getAllByText((_, element) => element?.textContent?.replace(/\s+/g, ' ').includes('score: 92') ?? false).length).toBeGreaterThan(0);
         expect(screen.getAllByText('highest completion').length).toBeGreaterThan(0);
+        expect(screen.getByText(/open_application: Launch a desktop app/)).toBeInTheDocument();
         fireEvent.click(screen.getAllByRole('button', { name: /run-1/i })[0]);
         expect(openRunsPanel).toHaveBeenCalledWith('run-1');
         fireEvent.click(screen.getAllByRole('button', { name: 'template:template-1' })[0]);

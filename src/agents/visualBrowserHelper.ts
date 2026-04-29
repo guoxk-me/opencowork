@@ -1,12 +1,14 @@
 import { getBrowserExecutor } from '../main/ipcHandlers';
 import { TaskVisualProviderSelection } from '../core/task/types';
 import { VisualAutomationService } from '../visual/VisualAutomationService';
+import { ComputerExecutionTarget } from '../visual/runtime/ComputerExecutionAdapter';
 
 export interface VisualBrowserTaskParams {
   task: string;
   adapterMode?: 'chat-structured' | 'responses-computer';
   maxTurns?: number;
   visualProvider?: TaskVisualProviderSelection | null;
+  executionTarget?: ComputerExecutionTarget | null;
 }
 
 export function resolveVisualAdapterMode(
@@ -38,5 +40,6 @@ export async function executeVisualBrowserTask(
     adapterMode: params.adapterMode || params.visualProvider?.adapterMode,
     maxTurns: params.maxTurns,
     visualProvider: params.visualProvider || undefined,
+    executionTarget: params.executionTarget || undefined,
   });
 }

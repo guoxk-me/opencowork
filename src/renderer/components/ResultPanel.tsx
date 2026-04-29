@@ -4,8 +4,10 @@ import { useSchedulerStore } from '../stores/schedulerStore';
 import { useTranslation } from '../i18n/useTranslation';
 import RelationBadge from './RelationBadge';
 import ArtifactViewer from './ArtifactViewer';
-import { SkillCandidateCard, SkillCandidateViewModel } from './SkillCandidateCard';
+import { SkillCandidateCard } from './SkillCandidateCard';
 import { extractVisualTraceSummary } from '../utils/visualTrace';
+import { extractActionContract } from '../utils/actionContract';
+import { extractSkillCandidate } from '../utils/resultFields';
 import {
   listVisualProviderCapabilities,
   resolveVisualProviderLabel,
@@ -42,12 +44,17 @@ export function ResultPanel({ embedded = false }: ResultPanelProps) {
     | {
         routeMode?: string;
         executionMode?: string;
-        reason?: string;
-        explicit?: boolean;
-        source?: string;
-      }
+        executionTarget?: {
+          kind?: string;
+          environment?: string;
+        };
+      reason?: string;
+      explicit?: boolean;
+      source?: string;
+    }
     | undefined;
-  const skillCandidate = rawOutputRecord?.skillCandidate as SkillCandidateViewModel | undefined;
+  const actionContract = extractActionContract(currentResult);
+  const skillCandidate = extractSkillCandidate(rawOutputRecord);
 
   if (!currentResult) {
     return null;
@@ -158,6 +165,34 @@ export function ResultPanel({ embedded = false }: ResultPanelProps) {
             {taskRouting.executionMode || taskRouting.routeMode || 'dom'}
             {taskRouting.explicit ? ' · explicit' : ''}
           </div>
+          {taskRouting.executionTarget && (
+            <div className="mt-1 text-text-muted">
+              target: {taskRouting.executionTarget.kind || 'browser'} · env:{' '}
+              {taskRouting.executionTarget.environment || 'playwright'}
+            </div>
+          )}
+          {actionContract && (
+            <div className="mt-2 space-y-2 text-text-muted">
+              <div>
+                desktop contract: {actionContract.supportedActions?.join(', ') || 'none'}
+              </div>
+              {actionContract.workflowSemantics && actionContract.workflowSemantics.length > 0 && (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {actionContract.workflowSemantics.slice(0, 4).map((semantic) => (
+                    <div key={semantic.action} className="rounded-md bg-surface px-3 py-2 text-xs">
+                      <div className="font-medium text-white">{semantic.action}</div>
+                      <div className="mt-1 text-text-secondary">{semantic.summary}</div>
+                      {semantic.examples && semantic.examples.length > 0 && (
+                        <div className="mt-1 text-text-muted">
+                          e.g. {semantic.examples.slice(0, 2).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {taskRouting.reason && <div className="mt-1 text-text-muted">{taskRouting.reason}</div>}
         </div>
       )}
