@@ -337,6 +337,65 @@ export class FeishuBot implements IMBot {
     );
   }
 
+  async sendMessageToUser(openId: string, message: string | IMCard): Promise<void> {
+    if (!this.client) {
+      throw new Error('[FeishuBot] Client not initialized');
+    }
+
+    const content =
+      typeof message === 'string'
+        ? JSON.stringify({ text: message })
+        : JSON.stringify(this.buildCardMessage(message));
+
+    await this.sendRawMessage(openId, typeof message === 'string' ? 'text' : 'interactive', content, 'open_id');
+  }
+
+  async sendAttachmentToUser(openId: string, attachment: IMAttachment): Promise<void> {
+    if (!this.client) {
+      throw new Error('[FeishuBot] Client not initialized');
+    }
+
+    if (!attachment.localPath) {
+      throw new Error('[FeishuBot] Attachment localPath is required');
+    }
+
+    const stats = await fs.promises.stat(attachment.localPath);
+    if (!stats.isFile() || stats.size === 0) {
+      throw new Error(`[FeishuBot] Attachment is not a readable file: ${attachment.localPath}`);
+    }
+
+    const isImageAttachment = attachment.type === 'image';
+    if (isImageAttachment) {
+      const uploaded = await this.client.im.v1.image.create({
+        data: {
+          image_type: 'message',
+          image: fs.createReadStream(attachment.localPath),
+        },
+      });
+
+      if (!uploaded?.image_key) {
+        throw new Error('[FeishuBot] Feishu image upload returned no image_key');
+      }
+
+      await this.sendRawMessage(openId, 'image', JSON.stringify({ image_key: uploaded.image_key }), 'open_id');
+      return;
+    }
+
+    const uploaded = await this.client.im.v1.file.create({
+      data: {
+        file_type: this.getFeishuFileType(attachment.fileName),
+        file_name: attachment.fileName || path.basename(attachment.localPath),
+        file: fs.createReadStream(attachment.localPath),
+      },
+    });
+
+    if (!uploaded?.file_key) {
+      throw new Error('[FeishuBot] Feishu file upload returned no file_key');
+    }
+
+    await this.sendRawMessage(openId, 'file', JSON.stringify({ file_key: uploaded.file_key }), 'open_id');
+  }
+
   private getFeishuFileType(fileName?: string): 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream' {
     const extension = (fileName ? path.extname(fileName) : '').toLowerCase();
     if (extension === '.opus') {
@@ -374,6 +433,20 @@ export class FeishuBot implements IMBot {
       await this.client.im.v1.message.create({
         params: {
           receive_id_type: 'chat_id',
+        },
+        data: {
+          receive_id: conversationId,
+          content,
+          msg_type: msgType,
+        },
+      });
+      return;
+    }
+
+    if (chatType === 'open_id') {
+      await this.client.im.v1.message.create({
+        params: {
+          receive_id_type: 'open_id',
         },
         data: {
           receive_id: conversationId,

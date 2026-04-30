@@ -4,8 +4,11 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IMAttachment, IMBot, IMMessage, IMNotification } from '../types';
+import { getBindingStore } from '../store/bindingStore';
+import { getDefaultDesktopUserId } from '../desktopBinding';
 
 const mockAgentRun = vi.fn();
+const mockAgentSetThreadId = vi.fn();
 const mockStartRun = vi.fn();
 const mockExecuteRun = vi.fn();
 const mockSetUserBinding = vi.fn();
@@ -13,6 +16,7 @@ const mockSetUserBinding = vi.fn();
 vi.mock('../../main/ipcHandlers', () => ({
   getSharedMainAgent: () => ({
     run: mockAgentRun,
+    setThreadId: mockAgentSetThreadId,
   }),
 }));
 
@@ -50,6 +54,7 @@ describe('DispatchService', () => {
   beforeEach(() => {
     bot = new MockBot();
     mockAgentRun.mockReset();
+    mockAgentSetThreadId.mockReset();
     mockStartRun.mockReset();
     mockExecuteRun.mockReset();
     mockSetUserBinding.mockReset();
@@ -60,6 +65,7 @@ describe('DispatchService', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
     tempDir = null;
+    getBindingStore().clear();
     vi.clearAllMocks();
   });
 
@@ -172,6 +178,68 @@ describe('DispatchService', () => {
     );
   });
 
+  it('re-sends the most recent generated file when the user asks for it', async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencowork-im-'));
+    const outputPath = path.join(tempDir, 'deck.pptx');
+    fs.writeFileSync(outputPath, 'pptx-content');
+
+    mockExecuteRun.mockResolvedValue({
+      id: 'result-2',
+      summary: `PPT 已生成：${outputPath}`,
+      artifacts: [
+        {
+          id: 'artifact-2',
+          type: 'file',
+          name: 'deck.pptx',
+          uri: outputPath,
+        },
+      ],
+      reusable: true,
+      completedAt: Date.now(),
+    });
+
+    const service = createDispatchService(bot);
+    await service.handleMessage({
+      id: 'm4',
+      platform: 'feishu',
+      userId: 'user-4',
+      content: '生成一个PPT',
+      type: 'text',
+      timestamp: Date.now(),
+      conversationId: 'chat-4',
+      chatType: 'p2p',
+      messageId: 'msg-4',
+    });
+
+    await service.handleMessage({
+      id: 'm5',
+      platform: 'feishu',
+      userId: 'user-4',
+      content: '把这个ppt发给我',
+      type: 'text',
+      timestamp: Date.now(),
+      conversationId: 'chat-4',
+      chatType: 'p2p',
+      messageId: 'msg-5',
+    });
+
+    expect(bot.sendAttachment).toHaveBeenCalledTimes(2);
+    expect(bot.sendAttachment).toHaveBeenCalledWith(
+      'chat-4',
+      expect.objectContaining({
+        type: 'file',
+        localPath: outputPath,
+        fileName: 'deck.pptx',
+      }),
+      'p2p'
+    );
+    expect(bot.sendMessage).toHaveBeenCalledWith(
+      'chat-4',
+      expect.stringContaining('已发送最近生成的文件'),
+      'p2p'
+    );
+  });
+
   it('replies to the originating group thread instead of private chat', async () => {
     mockAgentRun.mockResolvedValue({
       success: true,
@@ -200,6 +268,29 @@ describe('DispatchService', () => {
       'msg-group-1',
       expect.stringContaining('✅ 任务执行完成'),
       'group'
+    );
+  });
+
+  it('binds the current Feishu account to the single-device desktop user', async () => {
+    const service = createDispatchService(bot);
+    await service.handleMessage({
+      id: 'm6',
+      platform: 'feishu',
+      userId: 'im-user-1',
+      content: '绑定设备',
+      type: 'text',
+      timestamp: Date.now(),
+      conversationId: 'chat-6',
+      chatType: 'p2p',
+      messageId: 'msg-6',
+    });
+
+    const binding = getBindingStore().get('im-user-1');
+    expect(binding?.desktopUserId).toBe(getDefaultDesktopUserId());
+    expect(bot.sendMessage).toHaveBeenCalledWith(
+      'chat-6',
+      expect.stringContaining('已将当前飞书账号绑定到这台设备'),
+      'p2p'
     );
   });
 });

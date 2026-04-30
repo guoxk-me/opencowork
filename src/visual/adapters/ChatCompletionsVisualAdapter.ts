@@ -50,7 +50,7 @@ export class ChatCompletionsVisualAdapter implements VisualModelAdapter {
       capabilities: this.capabilities,
       providerState: {
         systemPrompt: config.systemPrompt,
-        temperature: config.temperature ?? 0,
+        temperature: config.temperature,
         timeoutMs: config.timeoutMs ?? 60000,
         visualProvider,
       },
@@ -82,7 +82,9 @@ export class ChatCompletionsVisualAdapter implements VisualModelAdapter {
         },
         body: JSON.stringify({
           model: session.model,
-          temperature: session.providerState?.temperature ?? 0,
+          ...(typeof session.providerState?.temperature === 'number'
+            ? { temperature: session.providerState.temperature }
+            : {}),
           reasoning_effort: 'medium',
           messages,
         }),

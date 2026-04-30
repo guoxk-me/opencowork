@@ -13,6 +13,8 @@ import { getTaskOrchestrator } from '../core/task/TaskOrchestrator';
 import { TaskArtifact, TaskResult } from '../core/task/types';
 import { buildTaskExecutionMetadata } from '../core/task/taskModelMetadata';
 import { attachTaskRoutingToResult, resolveTaskExecutionRoute } from '../core/task/taskRouting';
+import { getDefaultDesktopUserId } from './desktopBinding';
+import { getBindingStore } from './store/bindingStore';
 
 const PRIORITY_MAP: Record<string, number> = {
   low: 10,
@@ -28,6 +30,8 @@ export class DispatchService extends EventEmitter {
   private taskQueue: DispatchTask[] = [];
   private statusMap: Map<string, TaskStatus> = new Map();
   private statusInsertionOrder: string[] = [];
+  private recentFileAttachmentsByConversation: Map<string, IMAttachment> = new Map();
+  private recentFileAttachment: IMAttachment | null = null;
 
   constructor(bot: IMBot) {
     super();
@@ -43,6 +47,10 @@ export class DispatchService extends EventEmitter {
 
   async handleMessage(msg: IMMessage): Promise<void> {
     console.log('[DispatchService] Handling message from:', msg.userId);
+
+    if (await this.tryHandleFileShareRequest(msg)) {
+      return;
+    }
 
     if (msg.attachments && msg.attachments.length > 0) {
       await this.handleAttachmentMessage(msg);
@@ -68,6 +76,9 @@ export class DispatchService extends EventEmitter {
       case 'task':
         await this.handleTask(msg, cmd.args.join(' '));
         break;
+      case 'sendFile':
+        await this.handleSendFile(msg, cmd.args.join(' '));
+        break;
       case 'template':
         await this.handleTemplate(msg, cmd.args);
         break;
@@ -76,6 +87,9 @@ export class DispatchService extends EventEmitter {
         break;
       case 'list':
         await this.handleList(msg);
+        break;
+      case 'bindDevice':
+        await this.handleBindDevice(msg);
         break;
       case 'takeover':
         await this.handleTakeover(msg, cmd.args[0]);
@@ -300,6 +314,8 @@ export class DispatchService extends EventEmitter {
           extra: {
             userId: task.userId,
             conversationId: task.conversationId,
+            chatType: task.chatType,
+            replyTargetId: task.replyTargetId,
             attachments: task.attachments,
           },
         }),
@@ -314,8 +330,10 @@ export class DispatchService extends EventEmitter {
               : 'AI 正在执行任务',
         runId: task.id,
         templateId: task.templateId,
+        conversationId: task.conversationId,
       });
       const taskResult = await taskOrchestrator.executeRun(task.id, async () => {
+        agent.setThreadId(task.id);
         const result =
           routing.executionMode === 'visual' || routing.executionMode === 'hybrid'
             ? await executeVisualBrowserTask({
@@ -337,7 +355,9 @@ export class DispatchService extends EventEmitter {
           artifactsCount: taskResult.artifacts.length,
           runId: task.id,
           templateId: task.templateId,
+          conversationId: task.conversationId,
         });
+        this.rememberRecentTaskFiles(task, taskResult);
         await this.sendTaskResponse(
           task,
           '✅ 任务执行完成',
@@ -353,6 +373,7 @@ export class DispatchService extends EventEmitter {
           artifactsCount: taskResult.artifacts.length,
           runId: task.id,
           templateId: task.templateId,
+          conversationId: task.conversationId,
         });
         await this.sendTaskResponse(
           task,
@@ -369,6 +390,7 @@ export class DispatchService extends EventEmitter {
         artifactsCount: 0,
         runId: task.id,
         templateId: task.templateId,
+        conversationId: task.conversationId,
       });
       await this.sendTaskResponse(task, '❌ 任务执行失败', String(error));
     }
@@ -431,6 +453,31 @@ export class DispatchService extends EventEmitter {
       .join('\n');
 
     await this.bot.sendMessage(targetId, `📋 最近任务\n\n${list}`, chatType);
+  }
+
+  private async handleBindDevice(msg: IMMessage): Promise<void> {
+    const chatType = msg.chatType || 'p2p';
+    const targetId = this.getReplyTargetId(msg);
+    const desktopUserId = getDefaultDesktopUserId();
+
+    try {
+      const bindingStore = getBindingStore();
+      bindingStore.set(msg.userId, {
+        imUserId: msg.userId,
+        desktopUserId,
+        imPlatform: 'feishu',
+        boundAt: Date.now(),
+      });
+
+      await this.bot.sendMessage(
+        targetId,
+        `已将当前飞书账号绑定到这台设备。\n\n设备用户ID: ${desktopUserId}`,
+        chatType
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.bot.sendMessage(targetId, `绑定设备失败: ${message}`, chatType);
+    }
   }
 
   private async handleTakeover(msg: IMMessage, taskId: string): Promise<void> {
@@ -596,6 +643,7 @@ export class DispatchService extends EventEmitter {
 
     const conversationId = task.replyTargetId || task.conversationId;
     const chatType = task.chatType || 'p2p';
+    const conversationKey = task.conversationId;
 
     for (const artifact of taskResult.artifacts) {
       try {
@@ -610,6 +658,7 @@ export class DispatchService extends EventEmitter {
 
         const attachment = await this.buildArtifactAttachment(artifact);
         if (attachment) {
+          this.rememberRecentFile(conversationKey, attachment);
           await this.bot.sendAttachment(conversationId, attachment, chatType);
         }
       } catch (error) {
@@ -662,6 +711,242 @@ export class DispatchService extends EventEmitter {
     }
     const extension = path.extname(artifact.uri).toLowerCase();
     return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(extension);
+  }
+
+  private async handleSendFile(msg: IMMessage, filePathInput: string): Promise<void> {
+    const chatType = msg.chatType || 'p2p';
+    const targetId = this.getReplyTargetId(msg);
+    const filePath = filePathInput.trim();
+
+    if (!filePath) {
+      const recentAttachment = await this.getRecentFileAttachment(msg.conversationId);
+      if (!recentAttachment) {
+        await this.bot.sendMessage(
+          targetId,
+          '没有找到最近生成的文件。请直接发送本地路径，例如：发送文件 /tmp/虚沅数公司介绍.pptx',
+          chatType
+        );
+        return;
+      }
+
+      await this.bot.sendAttachment(targetId, recentAttachment, chatType);
+      await this.bot.sendMessage(targetId, `📎 已发送最近生成的文件：${recentAttachment.fileName || '附件'}`, chatType);
+      return;
+    }
+
+    const attachment = await this.buildAttachmentFromLocalPath(filePath);
+    if (!attachment) {
+      await this.bot.sendMessage(
+        targetId,
+        `未找到可发送的文件：${filePath}`,
+        chatType
+      );
+      return;
+    }
+
+    await this.bot.sendAttachment(targetId, attachment, chatType);
+    this.rememberRecentFile(msg.conversationId, attachment);
+    await this.bot.sendMessage(targetId, `📎 已发送文件：${attachment.fileName || path.basename(filePath)}`, chatType);
+  }
+
+  private async tryHandleFileShareRequest(msg: IMMessage): Promise<boolean> {
+    if (!this.isFileShareRequest(msg.content)) {
+      return false;
+    }
+
+    const chatType = msg.chatType || 'p2p';
+    const targetId = this.getReplyTargetId(msg);
+    const explicitPath = this.extractLocalFilePath(msg.content);
+
+    if (explicitPath) {
+      const attachment = await this.buildAttachmentFromLocalPath(explicitPath);
+      if (attachment) {
+        await this.bot.sendAttachment(targetId, attachment, chatType);
+        this.rememberRecentFile(msg.conversationId, attachment);
+        await this.bot.sendMessage(targetId, `📎 已发送文件：${attachment.fileName || path.basename(explicitPath)}`, chatType);
+        return true;
+      }
+    }
+
+    const taskAttachment = await this.findLatestCompletedTaskAttachment(msg.conversationId);
+    if (taskAttachment) {
+      await this.bot.sendAttachment(targetId, taskAttachment, chatType);
+      this.rememberRecentFile(msg.conversationId, taskAttachment);
+      await this.bot.sendMessage(
+        targetId,
+        `📎 已发送最近生成的文件：${taskAttachment.fileName || '附件'}`,
+        chatType
+      );
+      return true;
+    }
+
+    const recentAttachment = await this.getRecentFileAttachment(msg.conversationId);
+    if (!recentAttachment) {
+      return false;
+    }
+
+    await this.bot.sendAttachment(targetId, recentAttachment, chatType);
+    await this.bot.sendMessage(targetId, `📎 已发送最近生成的文件：${recentAttachment.fileName || '附件'}`, chatType);
+    return true;
+  }
+
+  private isFileShareRequest(content: string): boolean {
+    const text = content.trim();
+    if (!text) {
+      return false;
+    }
+
+    const intentKeywords = ['发给我', '发送给我', '传给我', '分享给我', '转发给我', '发一下', '发来', '发过来', '给我发', '发我'];
+    return intentKeywords.some((keyword) => text.includes(keyword));
+  }
+
+  private extractLocalFilePath(content: string): string | null {
+    const match = content.match(/\/(?:[^\s`"']+\/)*[^\s`"']+\.(?:pptx?|pdf|docx?|xlsx?|csv|zip|png|jpe?g|gif|webp|txt)/i);
+    return match ? match[0] : null;
+  }
+
+  private async buildAttachmentFromLocalPath(filePath: string): Promise<IMAttachment | null> {
+    if (!path.isAbsolute(filePath)) {
+      return null;
+    }
+
+    try {
+      const stats = await fs.promises.stat(filePath);
+      if (!stats.isFile() || stats.size === 0) {
+        return null;
+      }
+
+      return {
+        type: this.isImageFilePath(filePath) ? 'image' : 'file',
+        fileName: path.basename(filePath),
+        localPath: filePath,
+        size: stats.size,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private isImageFilePath(filePath: string): boolean {
+    return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(path.extname(filePath).toLowerCase());
+  }
+
+  private async getRecentFileAttachment(conversationId: string): Promise<IMAttachment | null> {
+    const attachment = this.recentFileAttachmentsByConversation.get(conversationId);
+    if (attachment?.localPath) {
+      return this.buildAttachmentFromLocalPath(attachment.localPath);
+    }
+
+    if (this.recentFileAttachment?.localPath) {
+      return this.buildAttachmentFromLocalPath(this.recentFileAttachment.localPath);
+    }
+
+    return null;
+  }
+
+  private async findLatestCompletedTaskAttachment(conversationId: string): Promise<IMAttachment | null> {
+    const statuses = Array.from(this.statusMap.values()).filter(
+      (status) => status.status === 'completed' && status.conversationId === conversationId
+    );
+
+    const latestStatus = statuses.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (!latestStatus?.result) {
+      return null;
+    }
+
+    const artifacts = Array.isArray(latestStatus.result.artifacts) ? latestStatus.result.artifacts : [];
+    for (const artifact of artifacts as TaskArtifact[]) {
+      if (!artifact?.uri) {
+        continue;
+      }
+
+      const attachment = await this.buildArtifactAttachment(artifact);
+      if (attachment) {
+        return attachment;
+      }
+    }
+
+    for (const filePath of this.extractFilePathsFromText(String(latestStatus.resultSummary || latestStatus.result?.summary || ''))) {
+      const attachment = await this.buildAttachmentFromLocalPath(filePath);
+      if (attachment) {
+        return attachment;
+      }
+    }
+
+    return null;
+  }
+
+  private rememberRecentFile(conversationId: string, attachment: IMAttachment): void {
+    if (!attachment.localPath) {
+      return;
+    }
+
+    this.recentFileAttachment = {
+      ...attachment,
+      localPath: attachment.localPath,
+    };
+    this.recentFileAttachmentsByConversation.set(conversationId, {
+      ...attachment,
+      localPath: attachment.localPath,
+    });
+  }
+
+  private rememberRecentTaskFiles(task: DispatchTask, taskResult: TaskResult): void {
+    const conversationId = task.conversationId;
+    const fileArtifacts = (taskResult.artifacts || []).filter((artifact) => artifact.type === 'file' || artifact.type === 'image');
+
+    for (const artifact of fileArtifacts) {
+      const attachment = artifact.uri ? this.createAttachmentFromArtifactPath(artifact.uri, artifact) : null;
+      if (attachment) {
+        this.rememberRecentFile(conversationId, attachment);
+      }
+    }
+
+    for (const filePath of this.extractFilePathsFromText(taskResult.summary)) {
+      const attachment = this.createAttachmentFromArtifactPath(filePath);
+      if (attachment) {
+        this.rememberRecentFile(conversationId, attachment);
+      }
+    }
+  }
+
+  private createAttachmentFromArtifactPath(
+    filePath: string,
+    artifact?: Pick<TaskArtifact, 'mimeType' | 'type' | 'name'>
+  ): IMAttachment | null {
+    if (!path.isAbsolute(filePath)) {
+      return null;
+    }
+
+    try {
+      const stats = fs.statSync(filePath);
+      if (!stats.isFile() || stats.size === 0) {
+        return null;
+      }
+
+      return {
+        type: artifact?.type === 'image' || this.isImageFilePath(filePath) ? 'image' : 'file',
+        fileName: artifact?.name || path.basename(filePath),
+        mimeType: artifact?.mimeType,
+        size: stats.size,
+        localPath: filePath,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private extractFilePathsFromText(text: string): string[] {
+    if (!text) {
+      return [];
+    }
+
+    const matches = text.match(/\/(?:[^\s`"']+\/)*[^\s`"']+\.(?:pptx?|pdf|docx?|xlsx?|csv|zip|png|jpe?g|gif|webp|txt)/gi);
+    if (!matches) {
+      return [];
+    }
+
+    return Array.from(new Set(matches));
   }
 
   updateTaskStatus(taskId: string, status: Partial<TaskStatus>): void {

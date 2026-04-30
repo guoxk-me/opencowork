@@ -9,6 +9,8 @@ import { ChatOpenAI } from '@langchain/openai';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { BrowserWindow } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import { getCheckpointer, AgentCheckpointer } from '../checkpointers/agentCheckpointer';
 import { getLogger, LoggerConfig } from './agentLogger';
 import { getBrowserExecutor } from '../main/ipcHandlers';
@@ -41,6 +43,25 @@ import { VisionExecutor } from '../core/executor/VisionExecutor';
 import { VisualAutomationService } from '../visual/VisualAutomationService';
 import { HybridToolRouter } from '../visual';
 import { executeVisualBrowserTask } from './visualBrowserHelper';
+import { getTaskOrchestrator } from '../core/task/TaskOrchestrator';
+import { getFeishuService } from '../im/feishu/FeishuService';
+import { IMAttachment } from '../im/types';
+import { getBindingStore } from '../im/store/bindingStore';
+import { getDefaultDesktopUserId } from '../im/desktopBinding';
+
+interface CurrentFeishuTarget {
+  conversationId: string;
+  chatType?: string;
+  targetType: 'im-conversation' | 'bound-user';
+}
+
+interface FeishuTargetResolution {
+  target: CurrentFeishuTarget | null;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
 
 function cleanHtmlText(text: string): string {
   return text
@@ -161,6 +182,88 @@ function getAgent(): MainAgent | null {
 export function clearAgentInstance(): void {
   currentAgentInstance = null;
   console.log('[MainAgent] Instance cleared');
+}
+
+function resolveCurrentFeishuTarget(agent: MainAgent | null): FeishuTargetResolution {
+  if (!agent) {
+    return {
+      target: null,
+      error: {
+        code: 'FEISHU_TARGET_UNAVAILABLE',
+        message: 'Current agent instance is unavailable',
+      },
+    };
+  }
+
+  const run = getTaskOrchestrator().getRun(agent.getThreadId());
+  const metadata = run?.metadata && typeof run.metadata === 'object' ? (run.metadata as Record<string, unknown>) : null;
+  if (!metadata || metadata.source !== 'im') {
+    const binding = getBindingStore().getByDesktopUserId(getDefaultDesktopUserId());
+    if (!binding?.imUserId) {
+      return {
+        target: null,
+        error: {
+          code: 'FEISHU_BINDING_REQUIRED',
+          message:
+            'This task is not running from a Feishu chat, and no Feishu account is bound to this device yet. Open Feishu and send "绑定设备" to the bot once, then retry.',
+        },
+      };
+    }
+
+    return {
+      target: {
+        conversationId: binding.imUserId,
+        chatType: 'p2p',
+        targetType: 'bound-user',
+      },
+    };
+  }
+
+  const chatType = typeof metadata.chatType === 'string' ? metadata.chatType : undefined;
+  const replyTargetId = typeof metadata.replyTargetId === 'string' ? metadata.replyTargetId : undefined;
+  const conversationId = typeof metadata.conversationId === 'string' ? metadata.conversationId : undefined;
+  const targetId = chatType === 'group' ? replyTargetId || conversationId : conversationId || replyTargetId;
+
+  if (!targetId) {
+    return {
+      target: null,
+      error: {
+        code: 'FEISHU_TARGET_UNAVAILABLE',
+        message: 'Current IM task is missing a usable Feishu conversation target',
+      },
+    };
+  }
+
+  return {
+    target: {
+      conversationId: targetId,
+      chatType,
+      targetType: 'im-conversation',
+    },
+  };
+}
+
+function buildFeishuAttachment(filePath: string): IMAttachment | null {
+  if (!path.isAbsolute(filePath)) {
+    return null;
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile() || stats.size === 0) {
+      return null;
+    }
+
+    const extension = path.extname(filePath).toLowerCase();
+    return {
+      type: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(extension) ? 'image' : 'file',
+      fileName: path.basename(filePath),
+      localPath: filePath,
+      size: stats.size,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function shouldAttemptVisualFallback(params: {
@@ -679,12 +782,116 @@ const plannerTool = tool(
   }
 );
 
+const sendFeishuAttachmentTool = tool(
+  async (params: { filePath: string; message?: string }) => {
+    const logger = getLogger();
+    const startTime = Date.now();
+    const agent = getAgent();
+
+    agent?.sendNodeStart('send_feishu_attachment', 'send', params);
+    logger.logToolCall('send_feishu_attachment', params, 'main-agent', params.filePath);
+
+    try {
+      const resolution = resolveCurrentFeishuTarget(agent);
+      const target = resolution.target;
+      if (!target) {
+        return {
+          success: false,
+          error: {
+            code: resolution.error?.code || 'FEISHU_TARGET_UNAVAILABLE',
+            message:
+              resolution.error?.message ||
+              'Current task is not an IM task with an available Feishu conversation target',
+          },
+        };
+      }
+
+      const bot = getFeishuService().getBot();
+      if (!bot) {
+        return {
+          success: false,
+          error: {
+            code: 'FEISHU_BOT_UNAVAILABLE',
+            message: 'Feishu bot is not initialized',
+          },
+        };
+      }
+
+      const attachment = buildFeishuAttachment(params.filePath);
+      if (!attachment?.localPath) {
+        return {
+          success: false,
+          error: {
+            code: 'INVALID_ATTACHMENT_PATH',
+            message: `File is not a readable local attachment: ${params.filePath}`,
+          },
+        };
+      }
+
+      if (target.targetType === 'bound-user') {
+        if (params.message) {
+          await bot.sendMessageToUser(target.conversationId, params.message);
+        }
+        await bot.sendAttachmentToUser(target.conversationId, attachment);
+      } else {
+        if (params.message) {
+          await bot.sendMessage(target.conversationId, params.message, target.chatType);
+        }
+        await bot.sendAttachment(target.conversationId, attachment, target.chatType);
+      }
+      const result = {
+        success: true,
+        output: {
+          fileName: attachment.fileName,
+          filePath: attachment.localPath,
+          conversationId: target.conversationId,
+          chatType: target.chatType || 'p2p',
+          targetType: target.targetType,
+        },
+      };
+      const duration = Date.now() - startTime;
+      agent?.sendNodeComplete('send_feishu_attachment', 'send', result, duration, params);
+      logger.logToolResult('send_feishu_attachment', result, duration, 'main-agent', params.filePath);
+      return result;
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      const result = {
+        success: false,
+        error: {
+          code: 'FEISHU_ATTACHMENT_SEND_FAILED',
+          message: error?.message || String(error),
+        },
+      };
+      agent?.sendNodeComplete('send_feishu_attachment', 'send', result, duration, params);
+      logger.logToolResult(
+        'send_feishu_attachment',
+        result,
+        duration,
+        'main-agent',
+        params.filePath,
+        result.error.message
+      );
+      return result;
+    }
+  },
+  {
+    name: 'send_feishu_attachment',
+    description:
+      'Send a local file attachment back to the current Feishu IM conversation. Only works for IM-originated tasks with an available Feishu chat target.',
+    schema: z.object({
+      filePath: z.string().describe('Absolute local file path to send, such as /tmp/report.pdf or /tmp/slides.pptx'),
+      message: z.string().optional().describe('Optional text message to send before the attachment'),
+    }),
+  }
+);
+
 const baseTools = [
   browserTool,
   visualBrowserTool,
   cliTool,
   visionTool,
   plannerTool,
+  sendFeishuAttachmentTool,
   webfetchTool,
   websearchTool,
   schedulerTool,
@@ -928,24 +1135,28 @@ const BASE_STATE_MODIFIER = `你是一个浏览器自动化助手，擅长理解
    - 示例：使用 "xdg-open 文件路径.pptx" 或 "gio open 文件路径.pdf" 打开本地文件
 4. vision - 用于分析图片和屏幕内容
 5. planner - 用于分析和规划复杂任务
-6. webfetch - 用于获取指定URL的网页内容（支持text/markdown/html格式）
+6. send_feishu_attachment - 用于把本地文件发送回当前飞书会话
+   - 仅适用于从飞书 IM 发起的任务
+   - 适用于发送 PPT、PDF、图片、表格、报告等本地文件
+   - 在生成本地文件后，如果用户明确要求“通过飞书发给我”，应优先调用这个工具
+7. webfetch - 用于获取指定URL的网页内容（支持text/markdown/html格式）
    - 适用场景：数据采集、API调用、静态网页内容获取
    - 特点：比browser工具更轻量更快，但不执行JavaScript
-7. websearch - 用于实时网络搜索（Exa AI）
+8. websearch - 用于实时网络搜索（Exa AI）
    - 适用场景：查询最新信息、新闻、实时数据
-8. scheduler - 用于管理定时任务（Cron任务）
+9. scheduler - 用于管理定时任务（Cron任务）
    - 支持操作：list（列出所有任务）、create（创建任务）、update（更新任务）、delete（删除任务）、trigger（手动触发任务）
    - 适用场景：创建/管理定时执行的自动化任务
-9. list_skills - 用于列出所有已安装的 Skills
-   - 适用场景：用户询问"有哪些skill"或列出所有技能时使用
-10. list_mcp_tools - 用于列出当前已连接的 MCP 服务及其工具
-    - 适用场景：用户询问"有哪些mcp"、"有哪些外部工具"、"docs mcp 能做什么"时优先使用
-    - MCP 与 Skills 不同，不能用 list_skills 代替 list_mcp_tools
-11. execute_skill - 用于执行指定名称的 Skill
-    - 先阅读 Skill Catalog，再选择合适的 skillName
-    - 如果某个 Skill 明显适合当前任务，应优先尝试 execute_skill，而不是直接重写同类 CLI/browser 流程
-12. start_skill_recording - 开始录制 Skill
-13. finish_skill_recording - 完成录制并生成 Skill 文件
+10. list_skills - 用于列出所有已安装的 Skills
+    - 适用场景：用户询问"有哪些skill"或列出所有技能时使用
+11. list_mcp_tools - 用于列出当前已连接的 MCP 服务及其工具
+     - 适用场景：用户询问"有哪些mcp"、"有哪些外部工具"、"docs mcp 能做什么"时优先使用
+     - MCP 与 Skills 不同，不能用 list_skills 代替 list_mcp_tools
+12. execute_skill - 用于执行指定名称的 Skill
+     - 先阅读 Skill Catalog，再选择合适的 skillName
+     - 如果某个 Skill 明显适合当前任务，应优先尝试 execute_skill，而不是直接重写同类 CLI/browser 流程
+13. start_skill_recording - 开始录制 Skill
+14. finish_skill_recording - 完成录制并生成 Skill 文件
 
 执行流程：
 1. 理解用户任务
@@ -961,6 +1172,9 @@ const BASE_STATE_MODIFIER = `你是一个浏览器自动化助手，擅长理解
 - 对复杂视觉交互任务：
   1. 如果目标元素难以稳定用 selector 表达，优先使用 visual_browser
   2. 如果是结构化文本提取，不要默认使用 visual_browser；优先 extract 或 webfetch
+- 当用户要求“通过飞书发给我”且你已经生成了本地文件时：
+  1. 如果当前任务来自飞书 IM，调用 send_feishu_attachment 发送文件
+  2. 如果 send_feishu_attachment 返回不可用，明确说明当前任务不是 IM 来源或缺少飞书会话目标
 - 当用户询问可用能力时，区分 Skill 和 MCP：
   - Skills 用 list_skills 查询
   - MCP / 外部 docs 工具 / 已连接服务能力 用 list_mcp_tools 查询

@@ -136,6 +136,7 @@ export interface TaskStatus {
   resultSummary?: string;
   artifactsCount?: number;
   updatedAt: number;
+  conversationId?: string;
 }
 
 export interface ParsedCommand {

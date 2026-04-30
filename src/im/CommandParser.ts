@@ -6,10 +6,13 @@ export class CommandParser {
     TEMPLATE: '模板',
     STATUS: '状态',
     LIST: '列表',
+    BIND_DEVICE: '绑定设备',
     TAKEOVER: '接管',
     RETURN: '交还',
     CANCEL: '取消',
     HELP: '帮助',
+    SEND_FILE: '发送文件',
+    FILE: '文件',
   } as const;
 
   parse(content: string): ParsedCommand | null {
@@ -34,6 +37,9 @@ export class CommandParser {
     if (cmd === CommandParser.COMMANDS.LIST) {
       return { command: 'list', args: [], raw: content };
     }
+    if (cmd === CommandParser.COMMANDS.BIND_DEVICE) {
+      return { command: 'bindDevice', args: [], raw: content };
+    }
     if (cmd === CommandParser.COMMANDS.TAKEOVER) {
       return { command: 'takeover', args, raw: content };
     }
@@ -45,6 +51,9 @@ export class CommandParser {
     }
     if (cmd === CommandParser.COMMANDS.HELP) {
       return { command: 'help', args: [], raw: content };
+    }
+    if (cmd === CommandParser.COMMANDS.SEND_FILE || cmd === CommandParser.COMMANDS.FILE) {
+      return { command: 'sendFile', args, raw: content };
     }
 
     return { command: 'task', args: [trimmed], raw: content };
@@ -69,6 +78,9 @@ export class CommandParser {
 • 列表 - 查看最近任务
   例: @机器人 列表
 
+• 绑定设备 - 将当前飞书账号绑定到这台设备
+  例: @机器人 绑定设备
+
 • 接管 [任务ID] - 接管任务
   例: @机器人 接管 abc123
 
@@ -80,6 +92,9 @@ export class CommandParser {
 
 • 帮助 - 显示帮助
   例: @机器人 帮助
+
+• 发送文件 [本地路径] - 直接发送本地文件到飞书
+  例: @机器人 发送文件 /tmp/虚沅数公司介绍.pptx
 `.trim();
   }
 }
