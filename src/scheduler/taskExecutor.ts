@@ -12,6 +12,7 @@ import { getTaskOrchestrator } from '../core/task/TaskOrchestrator';
 import { createTaskEntityId } from '../core/task/types';
 import { buildTaskExecutionMetadata } from '../core/task/taskModelMetadata';
 import { attachTaskRoutingToResult, resolveTaskExecutionRoute } from '../core/task/taskRouting';
+import { InProcessAgentRuntimeApi } from '../core/runtime/AgentRuntimeApi';
 
 const DEFAULT_TASK_TIMEOUT = 300000; // 5 minutes
 
@@ -19,10 +20,34 @@ export class TaskExecutor {
   private historyService: HistoryService;
   private config: ExecutorConfig;
   private mainWindow: BrowserWindow | null = null;
+  private runtimeApi: InProcessAgentRuntimeApi;
 
   constructor(config: ExecutorConfig = { mode: ExecutorMode.INTEGRATED }) {
     this.historyService = getHistoryService();
     this.config = config;
+    this.runtimeApi = new InProcessAgentRuntimeApi({
+      defaultClient: 'scheduler',
+      adapter: {
+        startTask: async (params) => {
+          const queuedTask = params.metadata?.queuedTask as QueuedTask | undefined;
+          if (!queuedTask) {
+            return {
+              accepted: false,
+              error: 'Missing queued task for scheduler runtime execution',
+            };
+          }
+
+          const executionResult = await this.executeScheduledTask(queuedTask);
+          return {
+            accepted: true,
+            runId: executionResult.runId,
+            executionResult,
+          };
+        },
+        readRun: async ({ runId }) => getTaskOrchestrator().getRun(runId),
+        listRuns: async ({ limit } = {}) => getTaskOrchestrator().listRuns(limit),
+      },
+    });
   }
 
   setMainWindow(window: BrowserWindow | null): void {
@@ -30,6 +55,37 @@ export class TaskExecutor {
   }
 
   async execute(task: QueuedTask): Promise<TaskExecutionResult & { resultSummary?: string; artifactsCount?: number; runId?: string }> {
+    const response = await this.runtimeApi.startTask({
+      task: task.scheduledTask.execution.taskDescription || task.scheduledTask.description,
+      source: 'scheduler',
+      client: 'scheduler',
+      templateId: task.scheduledTask.execution.templateId,
+      input: task.scheduledTask.execution.input,
+      executionMode: task.scheduledTask.execution.executionMode,
+      metadata: { queuedTask: task },
+    });
+
+    if (response.executionResult) {
+      return response.executionResult as TaskExecutionResult & {
+        resultSummary?: string;
+        artifactsCount?: number;
+        runId?: string;
+      };
+    }
+
+    const now = Date.now();
+    return {
+      taskId: task.scheduledTask.id,
+      status: 'failed',
+      startTime: now,
+      endTime: now,
+      duration: 0,
+      error: response.error || 'Scheduler runtime task was not accepted',
+      retryCount: task.retryCount,
+    };
+  }
+
+  private async executeScheduledTask(task: QueuedTask): Promise<TaskExecutionResult & { resultSummary?: string; artifactsCount?: number; runId?: string }> {
     const scheduledTask = task.scheduledTask;
     const startTime = Date.now();
     const timeout = scheduledTask.execution?.timeout || DEFAULT_TASK_TIMEOUT;

@@ -1,6 +1,7 @@
 import { Plan, PlanNode, AnyAction } from '../action/ActionSchema';
 import { ExecutorRouter } from '../executor/ExecutorRouter';
 import { BrowserSnapshotState } from '../executor/BrowserExecutor';
+import { ApprovalEvaluationContext } from '../runtime/ApprovalPolicyService';
 
 export interface SerializedExecutionState {
   planId: string | null;
@@ -17,6 +18,12 @@ interface ExecutionCallbacks {
   onCondition?: (expression: string, result: boolean) => void;
   onLoopIteration?: (node: PlanNode, iteration: number) => void;
   onUserTakeover?: (node: PlanNode) => void;
+}
+
+interface ExecuteOptions {
+  completedNodeIds?: string[];
+  runId?: string;
+  approval?: ApprovalEvaluationContext;
 }
 
 type ExecutionEvent =
@@ -109,7 +116,7 @@ export class PlanExecutor {
   async *execute(
     plan: Plan,
     callbacks?: ExecutionCallbacks,
-    options?: { completedNodeIds?: string[] }
+    options?: ExecuteOptions
   ): AsyncGenerator<ExecutionEvent, void, unknown> {
     this.plan = plan;
     this.paused = false;
@@ -143,7 +150,7 @@ export class PlanExecutor {
         yield { type: 'node_start', node };
 
         if (node.action) {
-          const result = await this.executeAction(node.action);
+          const result = await this.executeAction(node.action, options);
 
           if (result.success) {
             lastResult = result;
@@ -250,14 +257,20 @@ export class PlanExecutor {
       .join('\n\n');
   }
 
-  private async executeAction(action: AnyAction): Promise<any> {
+  private async executeAction(action: AnyAction, options?: ExecuteOptions): Promise<any> {
     console.log(`[PlanExecutor] Executing action via router: ${action.type}`);
-    return await this.router.execute(action);
+    return await this.router.execute(action, {
+      runId: options?.runId,
+      approval: options?.approval,
+    });
   }
 
-  async executeSingleAction(action: AnyAction): Promise<any> {
+  async executeSingleAction(action: AnyAction, options?: ExecuteOptions): Promise<any> {
     console.log(`[PlanExecutor] Executing single action via router: ${action.type}`);
-    return await this.router.execute(action);
+    return await this.router.execute(action, {
+      runId: options?.runId,
+      approval: options?.approval,
+    });
   }
 
   private async waitForResume(): Promise<void> {

@@ -1,3 +1,5 @@
+import type { ExecutionOutput } from '../../shared/protocol';
+
 // Action类型枚举
 export enum ActionType {
   // Browser Actions
@@ -126,6 +128,7 @@ export type AnyAction =
 export interface ActionResult {
   success: boolean;
   output?: any;
+  executionOutput?: ExecutionOutput;
   error?: {
     code: string;
     message: string;

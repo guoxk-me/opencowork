@@ -20,6 +20,12 @@ import { getSettingsManager } from '../../config/settings';
 import { PersistedTaskState } from './taskState';
 import { getTaskStateStore, TaskStateStore } from './taskStateStore';
 import { createTaskResultError, mapAgentResultToTaskResult } from '../task/resultMapper';
+import { ApprovalEvaluationContext } from './ApprovalPolicyService';
+import { WorkspaceRuleSet, getWorkspaceRuleLoader } from './WorkspaceRuleLoader';
+import { getTaskTraceCollector } from './TaskTraceCollector';
+import { createRuntimeEvent } from '../../shared/protocol';
+import { FileChangeSummary, FileChangeWatcher } from './FileChangeWatcher';
+import { getRuntimeConfigService } from './RuntimeConfigService';
 
 export enum TaskStatus {
   IDLE = 'idle',
@@ -45,6 +51,7 @@ export interface TaskHandle {
   completedNodeIds?: string[];
   activeAction?: boolean;
   lastSavedStatePath?: string;
+  workspaceRules?: WorkspaceRuleSet[];
 }
 
 export interface TakeoverContext {
@@ -108,6 +115,7 @@ export class TaskEngine {
   private pendingSkillTaskDescription: string | null = null;
   private readonly MAX_EXECUTED_ACTIONS = 200;
   private stateStore: TaskStateStore;
+  private fileChangeWatchers = new Map<string, FileChangeWatcher>();
 
   cleanup(): void {
     this.clearPopupWait();
@@ -117,6 +125,7 @@ export class TaskEngine {
     this.executedActions = [];
     this.pendingSkillActions = [];
     this.pendingSkillTaskDescription = null;
+    this.fileChangeWatchers.clear();
     this.mainWindow = null;
     this.previewWindow = null;
     this.skillGenerator = null;
@@ -227,11 +236,41 @@ export class TaskEngine {
         }
       }
 
+      const workspaceRules = this.loadWorkspaceRules();
+      handle.workspaceRules = workspaceRules;
+      getTaskTraceCollector().recordRunContext({
+        runId: handle.id,
+        client: 'electron',
+        source: 'electron',
+        title: task,
+        task,
+        mode: 'execute',
+        workspaceRules,
+        metadata: {
+          runtimeType: 'task-engine',
+        },
+        startedAt: handle.createdAt,
+      });
+      const runtimeConfig = getRuntimeConfigService().get();
+      if (runtimeConfig.fileWatcher.enabled) {
+        const fileChangeWatcher = new FileChangeWatcher({
+          maxFileBytes: runtimeConfig.fileWatcher.maxFileBytes,
+          maxFiles: runtimeConfig.fileWatcher.maxFiles,
+        });
+        fileChangeWatcher.captureBaseline();
+        this.fileChangeWatchers.set(handle.id, fileChangeWatcher);
+      }
+
       const planContext: any = {
         currentUrl,
         currentPageContent,
         pageStructure,
       };
+
+      if (workspaceRules.length > 0) {
+        planContext.workspaceRules = workspaceRules.map((rule) => rule.content);
+        planContext.workspaceRuleSources = workspaceRules.map((rule) => rule.sourcePath);
+      }
 
       // 如果有上一个任务的结果，传递给 TaskPlanner
       if (previousTaskResult) {
@@ -333,6 +372,12 @@ export class TaskEngine {
 
       for await (const event of this.executor.execute(planCopy, undefined, {
         completedNodeIds: handle.completedNodeIds || [],
+        runId: handleId,
+        approval: this.buildApprovalContext(
+          handleId,
+          handle.taskDescription,
+          handle.workspaceRules || []
+        ),
       })) {
         switch (event.type) {
           case 'node_start':
@@ -500,7 +545,15 @@ export class TaskEngine {
 
                       try {
                         const retryResult = await this.executor.executeSingleAction(
-                          retryNode.action
+                          retryNode.action,
+                          {
+                            runId: handleId,
+                            approval: this.buildApprovalContext(
+                              handleId,
+                              handle.taskDescription,
+                              handle.workspaceRules || []
+                            ),
+                          }
                         );
 
                         if (retryResult.success) {
@@ -981,7 +1034,14 @@ export class TaskEngine {
     handle: TaskHandle
   ): Promise<{ shouldContinue: boolean; shouldReplan: boolean }> {
     try {
-      const retryResult = await this.executor.executeSingleAction(node.action);
+      const retryResult = await this.executor.executeSingleAction(node.action, {
+        runId: handle.id,
+        approval: this.buildApprovalContext(
+          handle.id,
+          handle.taskDescription,
+          handle.workspaceRules || []
+        ),
+      });
 
       if (retryResult.success) {
         console.log('[TaskEngine] Retry succeeded');
@@ -994,6 +1054,31 @@ export class TaskEngine {
     } catch (error) {
       console.error('[TaskEngine] Retry error:', error);
       return { shouldContinue: false, shouldReplan: true };
+    }
+  }
+
+  private buildApprovalContext(
+    runId: string,
+    taskDescription?: string,
+    workspaceRules: WorkspaceRuleSet[] = []
+  ): ApprovalEvaluationContext {
+    return {
+      runId,
+      runtimeMode: 'execute',
+      taskContext: {
+        task: taskDescription || '',
+        source: 'task-engine',
+      },
+      workspaceRules: workspaceRules.map((rule) => rule.content),
+    };
+  }
+
+  private loadWorkspaceRules(): WorkspaceRuleSet[] {
+    try {
+      return getWorkspaceRuleLoader().load().rules;
+    } catch (error) {
+      console.warn('[TaskEngine] Failed to load workspace rules:', error);
+      return [];
     }
   }
 
@@ -1090,6 +1175,7 @@ export class TaskEngine {
   }
 
   private sendTaskCompleted(handleId: string, summary: unknown): void {
+    const fileChanges = this.collectFileChanges(handleId);
     const taskResult = mapAgentResultToTaskResult({
       success: true,
       output: summary,
@@ -1103,18 +1189,67 @@ export class TaskEngine {
       result: taskResult,
       legacyResult: summary,
     });
+    getTaskTraceCollector().recordEvent(
+      createRuntimeEvent({
+        runId: handleId,
+        type: 'task/completed',
+        payload: { result: taskResult, legacyResult: summary, fileChanges },
+      })
+    );
   }
 
   private sendTaskError(handleId: string, message: string, code: string = 'TASK_FAILED'): void {
+    const fileChanges = this.collectFileChanges(handleId);
     const payload = {
       handleId,
       runId: handleId,
       status: 'failed',
       error: createTaskResultError(message, code),
+      fileChanges,
     };
 
     this.sendToRenderer('task:error', payload);
     this.sendToRenderer('task:failed', payload);
+    getTaskTraceCollector().recordEvent(
+      createRuntimeEvent({
+        runId: handleId,
+        type: 'task/failed',
+        payload,
+      })
+    );
+  }
+
+  private collectFileChanges(handleId: string): FileChangeSummary | null {
+    const watcher = this.fileChangeWatchers.get(handleId);
+    if (!watcher) {
+      return null;
+    }
+
+    this.fileChangeWatchers.delete(handleId);
+
+    try {
+      const summary = watcher.collectChanges(handleId);
+      for (const artifact of summary.artifacts) {
+        getTaskTraceCollector().recordEvent(
+          createRuntimeEvent({
+            runId: handleId,
+            type: 'artifact/created',
+            payload: {
+              artifact,
+              fileChanges: {
+                added: summary.added,
+                modified: summary.modified,
+                deleted: summary.deleted,
+              },
+            },
+          })
+        );
+      }
+      return summary;
+    } catch (error) {
+      console.warn('[TaskEngine] Failed to collect file changes:', error);
+      return null;
+    }
   }
 
   private async checkSkillGeneration(handleId: string): Promise<void> {

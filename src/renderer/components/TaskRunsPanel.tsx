@@ -23,6 +23,26 @@ interface TaskRunDetails {
   result: TaskResult | null;
   template: TaskTemplate | null;
   history: TaskHistoryRecord | null;
+  trace?: TaskTraceSummary | null;
+}
+
+interface TaskTraceSummary {
+  runId: string;
+  status: string;
+  startedAt: number;
+  updatedAt: number;
+  mode: string;
+  client: string;
+  source: string;
+  events: Array<{
+    id: string;
+    type: string;
+    timestamp: number;
+    sequence: number;
+    visibility: 'user' | 'debug' | 'internal';
+  }>;
+  artifacts: Array<{ id: string; kind: string; title: string; uri?: string }>;
+  workspaceRules?: Array<{ id: string; sourcePath: string; scopePath: string }>;
 }
 
 interface TaskRunsPanelProps {
@@ -195,6 +215,10 @@ export function TaskRunsPanel({ isOpen, onClose }: TaskRunsPanelProps) {
   const selectedExecutionTarget = extractExecutionTarget(selectedDetails?.run.metadata);
   const selectedActionContract = extractActionContract(selectedResult || historyResult || undefined);
   const skillCandidate = extractSkillCandidate(resultRawOutput);
+  const selectedTrace = selectedDetails?.trace || null;
+  const userTraceEvents = selectedTrace?.events.filter((event) => event.visibility === 'user') || [];
+  const debugTraceEvents = selectedTrace?.events.filter((event) => event.visibility === 'debug') || [];
+  const latestTraceEvents = selectedTrace?.events.slice(-5).reverse() || [];
 
   const filteredRuns = runs.filter((run) => {
     const matchesKeyword =
@@ -584,6 +608,92 @@ export function TaskRunsPanel({ isOpen, onClose }: TaskRunsPanelProps) {
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {selectedTrace && (
+                  <div className="rounded-lg border border-border bg-background px-3 py-3">
+                    <div className="text-xs uppercase tracking-wide text-text-muted mb-2">Runtime trace</div>
+                    <div className="grid grid-cols-2 gap-3 text-sm text-text-secondary md:grid-cols-4">
+                      <div>
+                        <div className="text-xs text-text-muted">status</div>
+                        <div className="mt-1 text-white">{selectedTrace.status}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-text-muted">mode</div>
+                        <div className="mt-1 text-white">{selectedTrace.mode}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-text-muted">events</div>
+                        <div className="mt-1 text-white">{selectedTrace.events.length}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-text-muted">artifacts</div>
+                        <div className="mt-1 text-white">{selectedTrace.artifacts.length}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-text-muted">
+                      <span>user: {userTraceEvents.length}</span>
+                      <span>debug: {debugTraceEvents.length}</span>
+                      <span>updated: {new Date(selectedTrace.updatedAt).toLocaleString()}</span>
+                      {selectedTrace.workspaceRules && selectedTrace.workspaceRules.length > 0 && (
+                        <span>rules: {selectedTrace.workspaceRules.length}</span>
+                      )}
+                    </div>
+
+                    {latestTraceEvents.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <div className="text-xs text-text-muted">latest events</div>
+                        {latestTraceEvents.map((event) => (
+                          <div key={event.id} className="rounded border border-border/70 px-2 py-2 text-xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-white">#{event.sequence} {event.type}</span>
+                              <span className="text-text-muted">{event.visibility}</span>
+                            </div>
+                            <div className="mt-1 text-text-muted">
+                              {new Date(event.timestamp).toLocaleString()}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {selectedTrace.artifacts.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <div className="text-xs text-text-muted">trace artifacts</div>
+                        {selectedTrace.artifacts.map((artifact) => (
+                          <div key={artifact.id} className="rounded border border-border/70 px-2 py-2 text-xs">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="text-white">
+                                  {artifact.kind}: {artifact.title}
+                                </div>
+                                {artifact.uri && (
+                                  <div className="mt-1 break-all text-text-muted">{artifact.uri}</div>
+                                )}
+                              </div>
+                              {artifact.uri && (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => void handleOpenArtifact(artifact.uri as string)}
+                                    className="rounded px-2 py-1 text-text-muted hover:bg-border hover:text-white"
+                                  >
+                                    Open
+                                  </button>
+                                  <button
+                                    onClick={() => void handleCopy(artifact.uri as string)}
+                                    className="rounded px-2 py-1 text-text-muted hover:bg-border hover:text-white"
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

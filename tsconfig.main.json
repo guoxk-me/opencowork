@@ -21,6 +21,7 @@
     "src/preview/**/*",
     "src/llm/**/*",
     "src/agents/**/*",
+    "src/shared/**/*",
     "src/memory/**/*",
     "src/checkpointers/**/*",
     "src/ipc/**/*",

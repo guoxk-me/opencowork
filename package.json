@@ -1,6 +1,6 @@
 {
   "name": "opencowork",
-  "version": "0.12.11",
+  "version": "0.14.0",
   "description": "Open-source desktop AI agent with browser automation, skills, and MCP support",
   "homepage": "https://opencowork.me",
   "repository": {

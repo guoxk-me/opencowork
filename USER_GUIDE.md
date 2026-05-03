@@ -155,15 +155,24 @@ Current behavior:
 - image attachments can use OCR or general image analysis through the vision path,
 - result file artifacts can be uploaded back to Feishu after task completion.
 
-## Current Runtime Direction
+## Agent Runtime Observability
 
-The current release line is moving toward a reusable local Agent Runtime:
+OpenCowork now includes the first reusable local Agent Runtime baseline:
 
 - shared protocol for task events, approvals, outputs, artifacts, and errors,
 - one runtime API for Electron, Scheduler, IM, MCP, and future clients,
 - unified approval policy across browser, desktop, visual, CLI, MCP, and skills,
 - Plan Mode for read-only analysis before execution,
 - trace and diff artifacts for audit-grade observability.
+
+In the task runs panel, run details can include:
+
+- runtime trace status, mode, event counts, and recent events,
+- trace artifacts such as full CLI logs and workspace diff files,
+- loaded workspace rules from `AGENTS.md`,
+- changed file summaries for completed or failed tasks.
+
+Runtime defaults are read from `config/runtime.json` when present. If the file is missing or invalid, OpenCowork falls back to safe defaults and continues running.
 
 See `docs/SPEC_P5_agent-runtime-platformization.md` for the detailed plan.
 

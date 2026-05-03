@@ -54,6 +54,8 @@ import { getDispatchService } from '../im/DispatchService';
 import { VisualAutomationService } from '../visual/VisualAutomationService';
 import { HybridToolRouter } from '../visual';
 import type { BrowserDesktopHandoffWorkflowResult } from '../visual/VisualAutomationService';
+import { InProcessAgentRuntimeApi } from '../core/runtime/AgentRuntimeApi';
+import { getTaskTraceCollector } from '../core/runtime/TaskTraceCollector';
 
 const taskEngine = new TaskEngine();
 const benchmarkRunService = new BenchmarkRunService();
@@ -539,14 +541,62 @@ type IpcHandler = (
   payload: any
 ) => Promise<any>;
 
+interface RuntimeIpcContext {
+  mainWindow: BrowserWindow | null;
+  previewWindow: BrowserWindow | null;
+}
+
+let ipcAgentRuntimeApi: InProcessAgentRuntimeApi | null = null;
+
+function getIpcAgentRuntimeApi(): InProcessAgentRuntimeApi {
+  if (!ipcAgentRuntimeApi) {
+    ipcAgentRuntimeApi = new InProcessAgentRuntimeApi({
+      adapter: {
+        startTask: async (params, context) => {
+          const ipcContext = context as RuntimeIpcContext | undefined;
+          return IPC_HANDLERS['task:start'](
+            ipcContext?.mainWindow || null,
+            ipcContext?.previewWindow || null,
+            {
+              ...params,
+              source: params.source || 'chat',
+              __runtimeAdapter: true,
+            }
+          );
+        },
+        readRun: async ({ runId }) => getTaskOrchestrator().getRun(runId),
+        listRuns: async ({ limit } = {}) => getTaskOrchestrator().listRuns(limit),
+      },
+    });
+  }
+
+  return ipcAgentRuntimeApi;
+}
+
 export const IPC_HANDLERS: Record<string, IpcHandler> = {
   // 任务相关 (v0.4 - 使用 MainAgent)
   'task:start': async (
     mainWindow,
     previewWindow,
-    { task, threadId, source = 'chat', templateId, params, executionMode, executionTargetKind }
+    { task, threadId, source = 'chat', templateId, params, executionMode, executionTargetKind, __runtimeAdapter }
   ) => {
     console.log('[IPC] task:start:', task, 'threadId:', threadId, 'source:', source, 'executionMode:', executionMode, 'executionTargetKind:', executionTargetKind);
+
+    if (!__runtimeAdapter && (source === 'chat' || source === 'mcp')) {
+      return getIpcAgentRuntimeApi().startTask(
+        {
+          task,
+          threadId,
+          source,
+          client: source === 'mcp' ? 'mcp' : 'electron',
+          templateId,
+          params,
+          executionMode,
+          executionTargetKind,
+        },
+        { mainWindow, previewWindow } satisfies RuntimeIpcContext
+      );
+    }
 
     try {
       const agent = await ensureSharedAgent(mainWindow, previewWindow);
@@ -949,7 +999,8 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
 
   'task:run:get': async (mainWindow, previewWindow, { runId }) => {
     try {
-      return getTaskRunRepository().getById(runId);
+      const run = getTaskRunRepository().getById(runId);
+      return run ? { ...run, trace: getTaskTraceCollector().getTrace(runId) } : null;
     } catch (error: any) {
       console.error('[IPC] task:run:get error:', error);
       return null;
@@ -974,6 +1025,7 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
         result,
         template,
         history,
+        trace: getTaskTraceCollector().getTrace(runId),
       };
     } catch (error: any) {
       console.error('[IPC] task:run:details error:', error);

@@ -139,6 +139,10 @@ export class TaskOrchestrator {
     return persistedRun;
   }
 
+  listRuns(limit: number = 50): TaskRun[] {
+    return this.repository.listRecent(limit);
+  }
+
   pauseRun(runId: string): TaskRun | null {
     return this.updateStatus(runId, 'paused');
   }

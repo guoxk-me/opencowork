@@ -15,6 +15,7 @@ import { buildTaskExecutionMetadata } from '../core/task/taskModelMetadata';
 import { attachTaskRoutingToResult, resolveTaskExecutionRoute } from '../core/task/taskRouting';
 import { getDefaultDesktopUserId } from './desktopBinding';
 import { getBindingStore } from './store/bindingStore';
+import { InProcessAgentRuntimeApi } from '../core/runtime/AgentRuntimeApi';
 
 const PRIORITY_MAP: Record<string, number> = {
   low: 10,
@@ -33,10 +34,33 @@ export class DispatchService extends EventEmitter {
   private recentFileAttachmentsByConversation: Map<string, IMAttachment> = new Map();
   private recentFileAttachment: IMAttachment | null = null;
   private isProcessingQueue = false;
+  private runtimeApi: InProcessAgentRuntimeApi;
 
   constructor(bot: IMBot) {
     super();
     this.bot = bot;
+    this.runtimeApi = new InProcessAgentRuntimeApi({
+      defaultClient: 'im',
+      adapter: {
+        startTask: async (params) => {
+          const dispatchTask = params.metadata?.dispatchTask as DispatchTask | undefined;
+          if (!dispatchTask) {
+            return {
+              accepted: false,
+              error: 'Missing dispatch task for IM runtime execution',
+            };
+          }
+
+          await this.forwardToDesktopDirect(dispatchTask);
+          return {
+            accepted: true,
+            runId: dispatchTask.id,
+          };
+        },
+        readRun: async ({ runId }) => getTaskOrchestrator().getRun(runId),
+        listRuns: async ({ limit } = {}) => getTaskOrchestrator().listRuns(limit),
+      },
+    });
     this.setupEventHandlers();
   }
 
@@ -299,6 +323,33 @@ export class DispatchService extends EventEmitter {
   }
 
   private async forwardToDesktop(task: DispatchTask): Promise<void> {
+    const prompt = this.buildTaskPrompt(task.description, task.attachments);
+    const response = await this.runtimeApi.startTask({
+      task: prompt,
+      source: 'im',
+      client: 'im',
+      runId: task.id,
+      templateId: task.templateId,
+      params: task.templateInput,
+      executionMode: task.executionMode,
+      metadata: { dispatchTask: task },
+    });
+
+    if (!response.accepted) {
+      this.updateTaskStatus(task.id, {
+        status: 'failed',
+        message: response.error || 'IM runtime task was not accepted',
+        resultSummary: response.error || 'IM runtime task was not accepted',
+        artifactsCount: 0,
+        runId: task.id,
+        templateId: task.templateId,
+        conversationId: task.conversationId,
+      });
+      await this.sendTaskResponse(task, '❌ 任务执行失败', response.error || 'IM runtime task was not accepted');
+    }
+  }
+
+  private async forwardToDesktopDirect(task: DispatchTask): Promise<void> {
     try {
       const agent = getSharedMainAgent();
       if (!agent) {

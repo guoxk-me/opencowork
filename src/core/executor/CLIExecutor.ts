@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { getExecutionOutputService } from '../runtime/ExecutionOutputService';
 
 const CLI_WHITELIST: Record<string, string[]> = {
   git: ['status', 'pull', 'push', 'clone', 'log', 'diff', 'branch', 'checkout', 'fetch'],
@@ -46,19 +47,35 @@ export class CLIExecutor {
     const cliAction = action as CLIExecuteAction;
     const { command, workingDir, env } = cliAction.params;
     const normalizedCommand = this.normalizeCommand(command, workingDir);
+    const runId = (cliAction as unknown as { runId?: string }).runId || cliAction.id;
 
     console.log(`[CLIExecutor] Executing: ${normalizedCommand}`);
 
     const validation = this.validateCommand(normalizedCommand);
     if (!validation.valid) {
+      const duration = Date.now() - startTime;
       return {
         success: false,
+        executionOutput: getExecutionOutputService().build({
+          runId,
+          actionId: cliAction.id,
+          target: 'cli',
+          status: 'failed',
+          summary: validation.error || 'Command validation failed',
+          durationMs: duration,
+          error: {
+            code: 'VALIDATION_FAILED',
+            message: validation.error || 'Command validation failed',
+            recoverable: false,
+          },
+          metadata: { command: normalizedCommand, workingDir },
+        }),
         error: {
           code: 'VALIDATION_FAILED',
           message: validation.error || 'Command validation failed',
           recoverable: false,
         },
-        duration: Date.now() - startTime,
+        duration,
       };
     }
 
@@ -81,14 +98,29 @@ export class CLIExecutor {
 
       timeoutId = setTimeout(() => {
         console.error('[CLIExecutor] Command timed out:', command);
+        const duration = Date.now() - startTime;
         resolve({
           success: false,
+          executionOutput: getExecutionOutputService().build({
+            runId,
+            actionId: cliAction.id,
+            target: 'cli',
+            status: 'timeout',
+            summary: `Command timed out after ${commandTimeout}ms`,
+            durationMs: duration,
+            error: {
+              code: 'TIMEOUT',
+              message: `Command timed out after ${commandTimeout}ms`,
+              recoverable: true,
+            },
+            metadata: { command: normalizedCommand, workingDir },
+          }),
           error: {
             code: 'TIMEOUT',
             message: `Command timed out after ${commandTimeout}ms`,
             recoverable: true,
           },
-          duration: Date.now() - startTime,
+          duration,
         });
       }, commandTimeout);
 
@@ -103,48 +135,110 @@ export class CLIExecutor {
             console.error(`[CLIExecutor] Command failed:`, error.message);
 
             if (error.killed) {
+              const duration = Date.now() - startTime;
               resolve({
                 success: false,
+                executionOutput: getExecutionOutputService().build({
+                  runId,
+                  actionId: cliAction.id,
+                  target: 'cli',
+                  status: 'timeout',
+                  summary: 'Command timed out after 60 seconds',
+                  stdout: stdout.toString(),
+                  stderr: stderr.toString(),
+                  durationMs: duration,
+                  error: {
+                    code: 'TIMEOUT',
+                    message: 'Command timed out after 60 seconds',
+                    recoverable: true,
+                  },
+                  metadata: { command: normalizedCommand, workingDir },
+                }),
                 error: {
                   code: 'TIMEOUT',
                   message: 'Command timed out after 60 seconds',
                   recoverable: true,
                 },
-                duration: Date.now() - startTime,
+                duration,
               });
               return;
             }
 
+            const duration = Date.now() - startTime;
             resolve({
               success: false,
               output: stdout.toString(),
+              executionOutput: getExecutionOutputService().build({
+                runId,
+                actionId: cliAction.id,
+                target: 'cli',
+                status: 'failed',
+                summary: (stderr ? stderr.toString() : '') || error.message,
+                stdout: stdout.toString(),
+                stderr: stderr.toString(),
+                exitCode: typeof error.code === 'number' ? error.code : undefined,
+                durationMs: duration,
+                error: {
+                  code: 'NON_ZERO_EXIT',
+                  message: (stderr ? stderr.toString() : '') || error.message,
+                  recoverable: true,
+                },
+                metadata: { command: normalizedCommand, workingDir },
+              }),
               error: {
                 code: 'COMMAND_FAILED',
                 message: (stderr ? stderr.toString() : '') || error.message,
                 recoverable: true,
               },
-              duration: Date.now() - startTime,
+              duration,
             });
             return;
           }
 
           console.log(`[CLIExecutor] Command succeeded`);
+          const duration = Date.now() - startTime;
 
           resolve({
             success: true,
             output: stdout.toString(),
-            duration: Date.now() - startTime,
+            executionOutput: getExecutionOutputService().build({
+              runId,
+              actionId: cliAction.id,
+              target: 'cli',
+              status: 'success',
+              summary: 'Command completed successfully',
+              stdout: stdout.toString(),
+              stderr: stderr.toString(),
+              durationMs: duration,
+              metadata: { command: normalizedCommand, workingDir },
+            }),
+            duration,
           });
         } catch (callbackError: any) {
           console.error('[CLIExecutor] Callback error:', callbackError);
+          const duration = Date.now() - startTime;
           resolve({
             success: false,
+            executionOutput: getExecutionOutputService().build({
+              runId,
+              actionId: cliAction.id,
+              target: 'cli',
+              status: 'failed',
+              summary: callbackError.message || String(callbackError),
+              durationMs: duration,
+              error: {
+                code: 'CALLBACK_ERROR',
+                message: callbackError.message || String(callbackError),
+                recoverable: true,
+              },
+              metadata: { command: normalizedCommand, workingDir },
+            }),
             error: {
               code: 'CALLBACK_ERROR',
               message: callbackError.message || String(callbackError),
               recoverable: true,
             },
-            duration: Date.now() - startTime,
+            duration,
           });
         }
       });
