@@ -32,6 +32,7 @@ export class DispatchService extends EventEmitter {
   private statusInsertionOrder: string[] = [];
   private recentFileAttachmentsByConversation: Map<string, IMAttachment> = new Map();
   private recentFileAttachment: IMAttachment | null = null;
+  private isProcessingQueue = false;
 
   constructor(bot: IMBot) {
     super();
@@ -119,6 +120,7 @@ export class DispatchService extends EventEmitter {
       return;
     }
 
+    const attachments = await this.resolveTaskAttachments(msg, description);
     const task: DispatchTask = {
       id: this.generateTaskId(),
       description,
@@ -128,7 +130,7 @@ export class DispatchService extends EventEmitter {
       conversationId: msg.conversationId,
       chatType: msg.chatType,
       replyTargetId: this.getReplyTargetId(msg),
-      attachments: msg.attachments,
+      attachments,
       createdAt: Date.now(),
     };
 
@@ -155,11 +157,12 @@ export class DispatchService extends EventEmitter {
       msg.chatType || 'p2p'
     );
 
-    await this.forwardToDesktop(task);
+    await this.processQueue();
   }
 
   private async handleAttachmentMessage(msg: IMMessage): Promise<void> {
     const attachments = msg.attachments || [];
+    this.rememberIncomingAttachments(msg.conversationId, attachments);
     const normalizedContent = msg.content.trim();
     const description = normalizedContent || this.buildDefaultAttachmentTaskDescription(attachments);
     await this.handleTask({ ...msg, content: description, type: 'text' }, description);
@@ -253,7 +256,7 @@ export class DispatchService extends EventEmitter {
         chatType
       );
 
-      await this.forwardToDesktop(task);
+      await this.processQueue();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.bot.sendMessage(targetId, `模板参数缺失或无效: ${message}`, chatType);
@@ -273,6 +276,26 @@ export class DispatchService extends EventEmitter {
       this.taskQueue.splice(index, 0, task);
     }
     console.log('[DispatchService] Task enqueued:', task.id, 'Queue size:', this.taskQueue.length);
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.isProcessingQueue) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
+    try {
+      while (this.taskQueue.length > 0) {
+        const task = this.taskQueue.shift();
+        if (!task) {
+          continue;
+        }
+
+        await this.forwardToDesktop(task);
+      }
+    } finally {
+      this.isProcessingQueue = false;
+    }
   }
 
   private async forwardToDesktop(task: DispatchTask): Promise<void> {
@@ -618,6 +641,30 @@ export class DispatchService extends EventEmitter {
     return `处理我刚发送的 ${attachments.length} 个文件`;
   }
 
+  private async resolveTaskAttachments(msg: IMMessage, description: string): Promise<IMAttachment[] | undefined> {
+    if (msg.attachments && msg.attachments.length > 0) {
+      return msg.attachments;
+    }
+
+    if (!this.hasRecentAttachmentReference(description)) {
+      return undefined;
+    }
+
+    const recentAttachment = await this.getRecentFileAttachment(msg.conversationId);
+    return recentAttachment ? [recentAttachment] : undefined;
+  }
+
+  private hasRecentAttachmentReference(content: string): boolean {
+    const text = content.trim();
+    if (!text) {
+      return false;
+    }
+
+    return ['这个文件', '刚发送的文件', '刚才的文件', '刚发的文件', '这个附件', '刚发送的附件'].some((keyword) =>
+      text.includes(keyword)
+    );
+  }
+
   private buildTaskPrompt(description: string, attachments?: IMAttachment[]): string {
     if (!attachments || attachments.length === 0) {
       return description;
@@ -889,6 +936,14 @@ export class DispatchService extends EventEmitter {
       ...attachment,
       localPath: attachment.localPath,
     });
+  }
+
+  private rememberIncomingAttachments(conversationId: string, attachments: IMAttachment[]): void {
+    for (const attachment of attachments) {
+      if (attachment.localPath) {
+        this.rememberRecentFile(conversationId, attachment);
+      }
+    }
   }
 
   private rememberRecentTaskFiles(task: DispatchTask, taskResult: TaskResult): void {

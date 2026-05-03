@@ -144,6 +144,22 @@ function sanitizeToolResultForModel(result: any): any {
   };
 }
 
+function shellQuoteArg(arg: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(arg)) {
+    return arg;
+  }
+
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+function buildCLICommand(command: string, args?: string[]): string {
+  if (!args || args.length === 0) {
+    return command;
+  }
+
+  return [command, ...args.map((arg) => shellQuoteArg(arg))].join(' ');
+}
+
 export interface AgentConfig {
   modelName?: string;
   temperature?: number;
@@ -676,12 +692,13 @@ const cliTool = tool(
       await agent?.waitIfPaused();
       agent?.ensureNotCancelled();
       const executor = getCLIExecutor();
+      const command = buildCLICommand(params.command, params.args);
       const result = await executor.execute({
         id: generateId(),
         type: ActionType.CLI_EXECUTE,
-        description: `Execute CLI: ${params.command}`,
+        description: `Execute CLI: ${command}`,
         params: {
-          command: params.command,
+          command,
           workingDir: params.workingDir,
         },
       } as any);
