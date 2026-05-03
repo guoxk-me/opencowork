@@ -215,7 +215,7 @@
     "installing": "安装中...",
     "install": "安装",
     "uninstall": "卸载",
-    "confirmUninstall": "确定卸载 \"{{name}}\"？",
+    "confirmUninstall": "确定卸载 \"{{name}}\"？这会删除该 Skill 目录及其中的 SKILL.md、脚本和资源文件。",
     "installSuccess": "安装成功",
     "installFailed": "安装失败",
     "validDirectory": "这是一个有效的 Skill 目录",

@@ -306,16 +306,21 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
     }
   };
 
-  const handleUninstall = async (skillName: string) => {
+  const handleUninstall = async (skill: SkillListing) => {
+    const skillName = skill.name;
     if (!confirm(t('skillPanel.confirmUninstall', { name: skillName }))) return;
 
     setIsLoading(true);
     try {
-      const result = await window.electron.invoke('skill:uninstall', { name: skillName });
+      const result = await window.electron.invoke('skill:uninstall', {
+        name: skillName,
+        source: skill.source,
+        path: skill.path,
+      });
       const payload = result?.data || result;
       if (result?.success && payload?.success !== false) {
         setMessage({ type: 'success', text: t('skillPanel.uninstallSuccess') });
-        loadSkills();
+        await loadSkills();
       } else {
         setMessage({
           type: 'error',
@@ -540,7 +545,7 @@ export function SkillPanel({ isOpen, onClose }: SkillPanelProps) {
                           </svg>
                         </button>
                         <button
-                          onClick={() => handleUninstall(skill.name)}
+                          onClick={() => void handleUninstall(skill)}
                           className="p-1 rounded hover:bg-border text-text-muted hover:text-red-400"
                           title="卸载"
                           disabled={isLoading}

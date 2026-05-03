@@ -2683,11 +2683,19 @@ export const IPC_HANDLERS: Record<string, IpcHandler> = {
     }
   },
 
-  'skill:uninstall': async (mainWindow, previewWindow, { name }: { name: string }) => {
+  'skill:uninstall': async (
+    mainWindow,
+    previewWindow,
+    {
+      name,
+      source,
+      path: skillPath,
+    }: { name: string; source?: 'official' | 'agent-created' | 'market'; path?: string }
+  ) => {
     try {
       const { SkillMarket } = await import('../skills/skillMarket.js');
       const market = new SkillMarket();
-      const result = await market.uninstallSkill(name);
+      const result = await market.uninstallSkill(name, source, skillPath);
       return result;
     } catch (error: any) {
       console.error('[IPC] skill:uninstall error:', error);

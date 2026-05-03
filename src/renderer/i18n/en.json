@@ -215,7 +215,7 @@
     "installing": "Installing...",
     "install": "Install",
     "uninstall": "Uninstall",
-    "confirmUninstall": "Are you sure you want to uninstall \"{{name}}\"?",
+    "confirmUninstall": "Uninstall \"{{name}}\"? This will delete the skill directory, including SKILL.md, scripts, and resource files.",
     "installSuccess": "Installation successful",
     "installFailed": "Installation failed",
     "validDirectory": "This is a valid skill directory",

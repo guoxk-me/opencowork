@@ -208,21 +208,34 @@ export class SkillMarket {
     }
   }
 
-  async uninstallSkill(skillName: string): Promise<{ success: boolean; error?: string }> {
+  async uninstallSkill(
+    skillName: string,
+    source?: SkillSource,
+    skillPath?: string
+  ): Promise<{ success: boolean; error?: string }> {
     try {
-      const skill = await this.loader.getSkill(skillName);
-      if (!skill?.source) {
+      const skills = await this.loader.loadAllSkills();
+      const resolvedSkillPath = skillPath ? path.resolve(skillPath) : undefined;
+      const skill =
+        (resolvedSkillPath
+          ? skills.find((candidate) => path.resolve(candidate.path) === resolvedSkillPath)
+          : null) ||
+        skills.find(
+          (candidate) =>
+            candidate.manifest.name === skillName && (!source || candidate.source === source)
+        );
+
+      if (!skill) {
         return { success: false, error: 'Skill not found' };
       }
 
-      const skillPath = path.join(await this.getSourceDirectory(skill.source), skillName);
-      const stats = await fs.promises.stat(skillPath);
+      const stats = await fs.promises.stat(skill.path);
 
       if (!stats.isDirectory()) {
         return { success: false, error: 'Skill not found' };
       }
 
-      await fs.promises.rm(skillPath, { recursive: true });
+      await fs.promises.rm(skill.path, { recursive: true, force: true });
       this.loader.clearCache();
 
       return { success: true };
