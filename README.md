@@ -157,6 +157,7 @@ This direction is documented in:
 git clone https://github.com/LeonGaoHaining/opencowork.git
 cd opencowork
 npm install
+npx playwright install chromium
 ```
 
 ### Configure Your Model
