@@ -136,11 +136,6 @@ Electron UI / Scheduler / IM / MCP / Future CLI
   -> Result, history, template, benchmark, and artifact surfaces
 ```
 
-This direction is documented in:
-
-- `docs/PRD.md` section `21. PRD 7.0`,
-- `docs/SPEC_P5_agent-runtime-platformization.md`,
-- `docs/ROADMAP.md` under `P5: Agent runtime platformization`.
 
 ## Quick Start
 
