@@ -136,6 +136,27 @@ Electron UI / Scheduler / IM / MCP / Future CLI
   -> Result, history, template, benchmark, and artifact surfaces
 ```
 
+## Security Notice
+
+OpenCowork is a local-first desktop AI agent runtime. It can operate a headed browser, call local tools, connect to MCP servers, process files, run scheduled workflows, and integrate with IM systems such as Feishu. Because the agent can perform real actions in a local desktop environment, users should treat it as a trusted automation tool with operating privileges, not as a sandboxed chatbot.
+
+To reduce the risk of accidental operations, credential exposure, and data leakage, we recommend running OpenCowork on a dedicated AI automation device, virtual machine, or isolated system account. Avoid mixing it with personal daily-use environments, production administrator accounts, or high-sensitivity data workspaces.
+
+Recommended usage:
+
+- Run OpenCowork on a dedicated AI device, virtual machine, or isolated system account whenever possible.
+- Use OpenCowork only on machines, networks, and operating system accounts you trust.
+- Review agent actions before allowing access to sensitive websites, internal systems, credentials, private files, or production environments.
+- Keep model and integration configuration local. Do not commit `config/llm.json`, `config/feishu.json`, API keys, tokens, cookies, generated databases, or private task artifacts.
+- Use placeholder credentials in examples, documentation, issues, and pull requests.
+- Be careful when connecting external MCP servers or installing third-party skills, because they may extend what the agent can access or execute.
+- For scheduled tasks and reusable templates, verify the workflow behavior before running it unattended.
+- Report sensitive security findings through GitHub Security Advisories instead of public issues.
+
+OpenCowork is commonly used in trusted single-user desktop deployments. This reduces some multi-tenant web risks, but credential leakage, unsafe remote access, uncontrolled task execution, data loss, persistent crashes, and resource leaks remain important security concerns and should be reported responsibly.
+
+See `SECURITY.md` for the vulnerability reporting policy.
+
 
 ## Quick Start
 
