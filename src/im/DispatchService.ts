@@ -16,13 +16,19 @@ import { attachTaskRoutingToResult, resolveTaskExecutionRoute } from '../core/ta
 import { getDefaultDesktopUserId } from './desktopBinding';
 import { getBindingStore } from './store/bindingStore';
 import { InProcessAgentRuntimeApi } from '../core/runtime/AgentRuntimeApi';
+import { getLLMClient } from '../llm/OpenAIResponses';
 import {
   buildFeishuTaskPrompt,
+  isExplicitFeishuCommandText,
   MAX_FEISHU_CONVERSATION_CONTEXT_CHARS,
   MAX_FEISHU_CONVERSATION_TURNS,
+  normalizeFeishuConversationText,
+  parseFeishuSelectionContext,
+  resolveFeishuSelectionReply,
+  resolveFeishuSelectionReplyWithLLM,
   truncateFeishuConversationText,
 } from './feishuPrompt';
-import type { FeishuConversationTurn } from './feishuPrompt';
+import type { FeishuConversationTurn, FeishuSelectionContext } from './feishuPrompt';
 
 const PRIORITY_MAP: Record<string, number> = {
   low: 10,
@@ -42,6 +48,7 @@ export class DispatchService extends EventEmitter {
   private recentFileAttachmentsByConversation: Map<string, IMAttachment> = new Map();
   private recentFileAttachment: IMAttachment | null = null;
   private conversationTurnsByConversation: Map<string, FeishuConversationTurn[]> = new Map();
+  private selectionContextByConversation: Map<string, FeishuSelectionContext> = new Map();
   private isProcessingQueue = false;
   private runtimeApi: InProcessAgentRuntimeApi;
 
@@ -91,11 +98,45 @@ export class DispatchService extends EventEmitter {
       return;
     }
 
-    const parser = new CommandParser();
-    const cmd = parser.parse(msg.content);
-
     const chatType = msg.chatType || 'p2p';
     const targetId = this.getReplyTargetId(msg);
+    const selectionContext = this.selectionContextByConversation.get(msg.conversationId) || null;
+    const normalizedContent = normalizeFeishuConversationText(msg.content);
+    const explicitCommand = isExplicitFeishuCommandText(normalizedContent);
+    let selectionReply = resolveFeishuSelectionReply(msg.content, selectionContext);
+
+    if (selectionContext && !explicitCommand) {
+      try {
+        selectionReply = await resolveFeishuSelectionReplyWithLLM({
+          content: msg.content,
+          selectionContext,
+          conversationTurns: this.getConversationTurns(msg.conversationId),
+          llmClient: getLLMClient(),
+        });
+      } catch (error) {
+        console.warn('[DispatchService] LLM selection resolution failed, falling back to deterministic parsing:', error);
+      }
+    }
+
+    if (selectionContext && !explicitCommand && (selectionReply.rejected || selectionReply.awaitingSelection)) {
+      const availableOptions = selectionReply.availableOptions.join('、');
+      await this.bot.sendMessage(
+        targetId,
+        availableOptions
+          ? `请回复可选编号：${availableOptions}`
+          : '当前没有可用选项，请直接输入任务描述',
+        chatType
+      );
+      return;
+    }
+
+    const content = selectionReply.content;
+    if (selectionReply.shouldClearContext || explicitCommand) {
+      this.selectionContextByConversation.delete(msg.conversationId);
+    }
+
+    const parser = new CommandParser();
+    const cmd = parser.parse(content);
 
     if (!cmd) {
       await this.bot.sendMessage(
@@ -108,37 +149,37 @@ export class DispatchService extends EventEmitter {
 
     switch (cmd.command) {
       case 'task':
-        await this.handleTask(msg, cmd.args.join(' '));
+        await this.handleTask({ ...msg, content }, cmd.args.join(' '));
         break;
       case 'sendFile':
-        await this.handleSendFile(msg, cmd.args.join(' '));
+        await this.handleSendFile({ ...msg, content }, cmd.args.join(' '));
         break;
       case 'template':
-        await this.handleTemplate(msg, cmd.args);
+        await this.handleTemplate({ ...msg, content }, cmd.args);
         break;
       case 'status':
-        await this.handleStatus(msg, cmd.args[0]);
+        await this.handleStatus({ ...msg, content }, cmd.args[0]);
         break;
       case 'list':
-        await this.handleList(msg);
+        await this.handleList({ ...msg, content });
         break;
       case 'bindDevice':
-        await this.handleBindDevice(msg);
+        await this.handleBindDevice({ ...msg, content });
         break;
       case 'takeover':
-        await this.handleTakeover(msg, cmd.args[0]);
+        await this.handleTakeover({ ...msg, content }, cmd.args[0]);
         break;
       case 'return':
-        await this.handleReturn(msg);
+        await this.handleReturn({ ...msg, content });
         break;
       case 'cancel':
-        await this.handleCancel(msg, cmd.args[0]);
+        await this.handleCancel({ ...msg, content }, cmd.args[0]);
         break;
       case 'help':
-        await this.handleHelp(msg);
+        await this.handleHelp({ ...msg, content });
         break;
       default:
-        await this.handleHelp(msg);
+        await this.handleHelp({ ...msg, content });
     }
   }
 
@@ -203,7 +244,7 @@ export class DispatchService extends EventEmitter {
   private async handleAttachmentMessage(msg: IMMessage): Promise<void> {
     const attachments = msg.attachments || [];
     this.rememberIncomingAttachments(msg.conversationId, attachments);
-    const normalizedContent = msg.content.trim();
+    const normalizedContent = normalizeFeishuConversationText(msg.content);
     const description = normalizedContent || this.buildDefaultAttachmentTaskDescription(attachments);
     await this.handleTask({ ...msg, content: description, type: 'text' }, description);
   }
@@ -753,7 +794,7 @@ export class DispatchService extends EventEmitter {
   }
 
   private hasRecentAttachmentReference(content: string): boolean {
-    const text = content.trim();
+    const text = normalizeFeishuConversationText(content);
     if (!text) {
       return false;
     }
@@ -790,6 +831,15 @@ export class DispatchService extends EventEmitter {
       taskId: turn.taskId,
       createdAt: turn.createdAt,
     });
+
+    if (turn.role === 'assistant') {
+      const selectionContext = parseFeishuSelectionContext(turn.content, turn.taskId, turn.createdAt);
+      if (selectionContext) {
+        this.selectionContextByConversation.set(conversationId, selectionContext);
+      } else {
+        this.selectionContextByConversation.delete(conversationId);
+      }
+    }
 
     while (freshTurns.length > MAX_FEISHU_CONVERSATION_TURNS) {
       freshTurns.shift();
@@ -953,7 +1003,7 @@ export class DispatchService extends EventEmitter {
   }
 
   private isFileShareRequest(content: string): boolean {
-    const text = content.trim();
+    const text = normalizeFeishuConversationText(content);
     if (!text) {
       return false;
     }
@@ -963,7 +1013,9 @@ export class DispatchService extends EventEmitter {
   }
 
   private extractLocalFilePath(content: string): string | null {
-    const match = content.match(/\/(?:[^\s`"']+\/)*[^\s`"']+\.(?:pptx?|pdf|docx?|xlsx?|csv|zip|png|jpe?g|gif|webp|txt)/i);
+    const match = normalizeFeishuConversationText(content).match(
+      /\/(?:[^\s`"']+\/)*[^\s`"']+\.(?:pptx?|pdf|docx?|xlsx?|csv|zip|png|jpe?g|gif|webp|txt)/i
+    );
     return match ? match[0] : null;
   }
 
