@@ -116,6 +116,9 @@ export class MCPClient {
 
       console.log(`[MCPClient] Connected to server: ${serverName}`);
     } catch (error) {
+      await this.disconnect(serverName).catch((cleanupError) => {
+        console.warn(`[MCPClient] Failed to cleanup after connection error for ${serverName}:`, cleanupError);
+      });
       this.servers.set(serverName, {
         name: serverName,
         status: 'error',
@@ -135,6 +138,20 @@ export class MCPClient {
         return;
       }
 
+      let settled = false;
+      let connectionTimeout: NodeJS.Timeout | null = null;
+      const settle = (callback: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+          connectionTimeout = null;
+        }
+        callback();
+      };
+
       const child: ChildProcessWithoutNullStreams = spawn(command, args, {
         env: { ...process.env, ...env },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -149,7 +166,7 @@ export class MCPClient {
       child.stdout.on('data', (data: Buffer) => {
         const shouldResolve = this.handleStdoutChunk(serverName, data.toString());
         if (shouldResolve) {
-          resolve();
+          settle(() => resolve());
         }
       });
 
@@ -158,7 +175,7 @@ export class MCPClient {
       });
 
       child.on('error', (error: Error) => {
-        reject(error);
+        settle(() => reject(error));
       });
 
       child.on('exit', (code: number | null) => {
@@ -168,14 +185,16 @@ export class MCPClient {
         this.disconnect(serverName);
       });
 
-      setTimeout(() => reject(new Error('Connection timeout')), 10000);
+      connectionTimeout = setTimeout(() => {
+        settle(() => reject(new Error('Connection timeout')));
+      }, 10000);
 
       void this.sendStdioRequest(serverName, 'tools/list', {}, 5000)
         .then((response) => {
           const tools = this.extractToolsResponse(response);
           if (tools.length > 0) {
             this.registerTools(serverName, tools);
-            resolve();
+            settle(() => resolve());
           }
         })
         .catch(() => {
@@ -419,6 +438,15 @@ export class MCPClient {
   }
 
   async disconnect(serverName: string): Promise<void> {
+    const state = this.stdioState.get(serverName);
+    if (state) {
+      for (const pending of state.pending.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error(`MCP server ${serverName} disconnected`));
+      }
+      state.pending.clear();
+    }
+
     const process = this.processes.get(serverName);
     if (process) {
       process.kill();

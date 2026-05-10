@@ -15,6 +15,8 @@ export class HistoryStore {
   private syncToSqliteTimer: NodeJS.Timeout | null = null;
   private pendingSqliteWrites: TaskHistoryRecord[] = [];
   private flushInProgress = false;
+  private flushAgainRequested = false;
+  private flushPromise: Promise<void> | null = null;
   private maxRetries = 3;
   private retryCounts: Map<string, number> = new Map();
 
@@ -47,12 +49,31 @@ export class HistoryStore {
 
   private async flushToSqlite(): Promise<void> {
     if (this.flushInProgress) {
+      this.flushAgainRequested = true;
+      if (this.flushPromise) {
+        await this.flushPromise;
+      }
       return;
     }
     this.flushInProgress = true;
+    this.flushPromise = this.flushPendingBatch();
 
     try {
-      const records = [...this.pendingSqliteWrites];
+      await this.flushPromise;
+    } finally {
+      this.flushInProgress = false;
+      this.flushPromise = null;
+    }
+  }
+
+  private async flushPendingBatch(): Promise<void> {
+    do {
+      this.flushAgainRequested = false;
+      const records = this.pendingSqliteWrites.splice(0);
+      if (records.length === 0) {
+        continue;
+      }
+
       const failedRecords: TaskHistoryRecord[] = [];
 
       for (const record of records) {
@@ -74,10 +95,10 @@ export class HistoryStore {
         }
       }
 
-      this.pendingSqliteWrites = failedRecords;
-    } finally {
-      this.flushInProgress = false;
-    }
+      if (failedRecords.length > 0) {
+        this.pendingSqliteWrites.unshift(...failedRecords);
+      }
+    } while (this.flushAgainRequested);
   }
 
   async getTask(taskId: string): Promise<TaskHistoryRecord | null> {

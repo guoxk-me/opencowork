@@ -81,7 +81,7 @@ export class CLIExecutor {
 
     return new Promise((resolve) => {
       const options: any = {
-        timeout: 60000,
+        timeout: (cliAction.params as any).timeout || 60000,
         maxBuffer: 10 * 1024 * 1024,
       };
 
@@ -95,11 +95,27 @@ export class CLIExecutor {
 
       let timeoutId: NodeJS.Timeout | null = null;
       const commandTimeout = (cliAction.params as any).timeout || 60000;
+      let settled = false;
+      let child: ReturnType<typeof exec> | null = null;
+      const finish = (result: ActionResult): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        resolve(result);
+      };
 
       timeoutId = setTimeout(() => {
         console.error('[CLIExecutor] Command timed out:', command);
         const duration = Date.now() - startTime;
-        resolve({
+        if (child && !child.killed) {
+          child.kill('SIGTERM');
+        }
+        finish({
           success: false,
           executionOutput: getExecutionOutputService().build({
             runId,
@@ -124,10 +140,9 @@ export class CLIExecutor {
         });
       }, commandTimeout);
 
-      exec(normalizedCommand, options, (error, stdout, stderr) => {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
+      child = exec(normalizedCommand, options, (error, stdout, stderr) => {
+        if (settled) {
+          return;
         }
 
         try {
@@ -136,7 +151,7 @@ export class CLIExecutor {
 
             if (error.killed) {
               const duration = Date.now() - startTime;
-              resolve({
+              finish({
                 success: false,
                 executionOutput: getExecutionOutputService().build({
                   runId,
@@ -165,7 +180,7 @@ export class CLIExecutor {
             }
 
             const duration = Date.now() - startTime;
-            resolve({
+            finish({
               success: false,
               output: stdout.toString(),
               executionOutput: getExecutionOutputService().build({
@@ -198,7 +213,7 @@ export class CLIExecutor {
           console.log(`[CLIExecutor] Command succeeded`);
           const duration = Date.now() - startTime;
 
-          resolve({
+          finish({
             success: true,
             output: stdout.toString(),
             executionOutput: getExecutionOutputService().build({
@@ -217,7 +232,7 @@ export class CLIExecutor {
         } catch (callbackError: any) {
           console.error('[CLIExecutor] Callback error:', callbackError);
           const duration = Date.now() - startTime;
-          resolve({
+          finish({
             success: false,
             executionOutput: getExecutionOutputService().build({
               runId,

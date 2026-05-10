@@ -153,7 +153,7 @@ interface TaskState {
   // Ask User Dialog
   askUserRequest: AskUserRequest | null;
   setAskUserRequest: (request: AskUserRequest | null) => void;
-  respondToAskUser: (answer: string) => void;
+  respondToAskUser: (answer: string) => Promise<void>;
 
   // Visual Approval Dialog
   visualApprovalRequest: VisualApprovalRequest | null;
@@ -183,7 +183,7 @@ export const useTaskStore = create<TaskState>((set) => ({
       ],
     })),
   clearMessages: () => set({ messages: [] }),
-  setMessages: (messages) => set({ messages }),
+  setMessages: (messages) => set({ messages: messages.slice(-MAX_MESSAGES) }),
 
   // Task
   task: null,
@@ -278,20 +278,20 @@ export const useTaskStore = create<TaskState>((set) => ({
   // Ask User Dialog
   askUserRequest: null,
   setAskUserRequest: (request) => set({ askUserRequest: request }),
-  respondToAskUser: (answer) => {
+  respondToAskUser: async (answer) => {
     const request = useTaskStore.getState().askUserRequest;
     try {
       if (request && window.electron) {
-        window.electron.invoke('ask:user:response', {
+        await window.electron.invoke('ask:user:response', {
           requestId: request.requestId,
           answer,
           cancelled: false,
         });
       }
+      set({ askUserRequest: null });
     } catch (error) {
       console.error('[taskStore] respondToAskUser error:', error);
     }
-    set({ askUserRequest: null });
   },
 
   visualApprovalRequest: null,

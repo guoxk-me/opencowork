@@ -22,6 +22,8 @@ export interface DesktopHarnessSnapshot {
   hasShutdownHook: boolean;
 }
 
+const DESKTOP_HARNESS_COMMAND_TIMEOUT_MS = 60000;
+
 export function parseDesktopHarnessCommandSpec(
   raw: string | undefined,
   loggerPrefix: string
@@ -83,6 +85,7 @@ export function createDesktopHarnessCommandHooks(
           ...process.env,
           ...(launchCommand.env || {}),
         },
+        timeout: DESKTOP_HARNESS_COMMAND_TIMEOUT_MS,
       });
     };
   }
@@ -99,6 +102,7 @@ export function createDesktopHarnessCommandHooks(
           ...process.env,
           ...(shutdownCommand.env || {}),
         },
+        timeout: DESKTOP_HARNESS_COMMAND_TIMEOUT_MS,
       });
     };
   }

@@ -65,6 +65,13 @@ export interface TakeoverContext {
   };
 }
 
+class TaskExecutionAbort extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TaskExecutionAbort';
+  }
+}
+
 interface SkillGenerationAction {
   tool: string;
   args: unknown;
@@ -600,13 +607,13 @@ export class TaskEngine {
               }
             }
 
-            // 发送错误事件
+            // 发送错误事件并终止执行，避免后续节点继续运行后覆盖失败状态。
             this.sendTaskError(
               handleId,
               event.error?.message || 'Unknown error',
               event.error?.code || 'TASK_FAILED'
             );
-            break;
+            throw new TaskExecutionAbort(event.error?.message || 'Task execution failed');
           case 'completed':
             handle.activeAction = false;
             handle.status = TaskStatus.COMPLETED;
@@ -632,8 +639,12 @@ export class TaskEngine {
         handle.updatedAt = Date.now();
       }
     } catch (error: any) {
-      console.error(`[TaskEngine] Plan execution failed:`, error);
       handle.status = TaskStatus.FAILED;
+      if (error instanceof TaskExecutionAbort) {
+        console.warn(`[TaskEngine] Plan execution aborted:`, error.message);
+        return;
+      }
+      console.error(`[TaskEngine] Plan execution failed:`, error);
       this.sendTaskError(handleId, error.message || 'Unknown error');
       throw error;
     } finally {

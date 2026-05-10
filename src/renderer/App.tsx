@@ -109,6 +109,18 @@ function App() {
   const handledFailureRunIdsRef = useRef(new Set<string>());
   const { t } = useTranslation();
 
+  const getTaskEventId = (event: any): string | undefined =>
+    event?.runId || event?.data?.runId || event?.handleId || event?.data?.handleId;
+
+  const isCurrentTaskEvent = (event: any): boolean => {
+    const eventId = getTaskEventId(event);
+    if (!eventId) {
+      return true;
+    }
+    const state = useTaskStore.getState();
+    return eventId === state.currentRunId || eventId === state.task?.id;
+  };
+
   const interruptCurrentTask = async (reason: 'shortcut_escape' | 'user_activity') => {
     const currentTask = useTaskStore.getState().task;
     if (!currentTask?.id || currentTask.status !== 'executing' || interruptingRef.current) {
@@ -140,11 +152,15 @@ function App() {
   };
 
   const handleTaskFailure = (event: any): void => {
+    if (!isCurrentTaskEvent(event)) {
+      return;
+    }
+
     const approvalError = event?.error?.code === 'APPROVAL_REQUIRED';
     if (approvalError) {
       const pendingApproval = event?.pendingApproval || event?.data?.pendingApproval;
       setVisualApprovalRequest({
-        runId: event?.runId || event?.handleId || event?.data?.runId,
+        runId: event?.runId || event?.data?.runId,
         reason: event?.error?.message || 'Approval required before executing visual actions',
         actionRiskReasons: pendingApproval?.audit?.actionRiskReasons || [],
         matchedIntentKeywords: pendingApproval?.audit?.matchedIntentKeywords || [],
@@ -247,6 +263,9 @@ function App() {
       window.electron.on('task:completed', (event: any) => {
         try {
           console.log('[Renderer] Received task:completed', event);
+          if (!isCurrentTaskEvent(event)) {
+            return;
+          }
           const completedRunId = event?.runId || event?.handleId || event?.data?.runId;
           if (completedRunId) {
             handledFailureRunIdsRef.current.delete(completedRunId);
@@ -323,6 +342,9 @@ function App() {
       window.electron.on('task:statusUpdate', (event: any) => {
         try {
           console.log('[Renderer] Received task:statusUpdate', event);
+          if (!isCurrentTaskEvent(event)) {
+            return;
+          }
           const { updateTaskStatus, addLog, setTaskInterrupted } = useTaskStore.getState();
           if (event.status === 'replanning') {
             addLog({ type: 'info', message: event.message || t('logs.replanning') });

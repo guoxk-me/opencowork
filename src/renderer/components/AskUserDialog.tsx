@@ -36,18 +36,18 @@ export function AskUserDialog() {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const answer = selectedOption || customAnswer;
     if (answer.trim()) {
-      respondToAskUser(answer);
+      await respondToAskUser(answer);
     }
   };
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
     try {
       if (window.electron) {
-        window.electron.invoke('ask:user:response', {
+        await window.electron.invoke('ask:user:response', {
           requestId: askUserRequest.requestId,
           answer: '',
           cancelled: true,

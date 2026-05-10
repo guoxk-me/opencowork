@@ -145,11 +145,28 @@ export class VisualAutomationService {
         ...result,
       };
     } finally {
+      let cleanupError: unknown = null;
       if (computer.cleanup) {
-        await computer.cleanup();
+        try {
+          await computer.cleanup();
+        } catch (error) {
+          cleanupError = error;
+          console.warn('[VisualAutomationService] Computer cleanup failed:', error);
+        }
       }
 
-      await adapter.destroySession(session);
+      try {
+        await adapter.destroySession(session);
+      } catch (error) {
+        console.warn('[VisualAutomationService] Adapter session cleanup failed:', error);
+        if (!cleanupError) {
+          cleanupError = error;
+        }
+      }
+
+      if (cleanupError) {
+        throw cleanupError;
+      }
     }
   }
 
