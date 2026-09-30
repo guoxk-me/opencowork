@@ -18,3 +18,7 @@ PRD.md
 docs/PRD.md
 SPEC*.md
 docs/SPEC*.md
+
+# Local backups
+src/backup/
+pnpm-lock.yaml
