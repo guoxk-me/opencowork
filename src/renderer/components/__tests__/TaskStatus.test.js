@@ -1,14 +1,14 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const taskStoreState = {
+const taskStoreState = vi.hoisted(() => ({
     currentRunId: 'run-1',
     currentTemplateId: 'template-1',
     currentVisualProvider: {
         id: 'provider-1',
         name: 'Provider One',
     },
-};
+}));
 vi.mock('../../stores/taskStore', () => ({
     useTaskStore: () => taskStoreState,
 }));
