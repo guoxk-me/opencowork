@@ -32,12 +32,6 @@ export function ChatInput() {
       progress: { current: 0, total: 0 },
     });
 
-    // Add AI response
-    addMessage({
-      role: 'ai',
-      content: t('chatUI.taskCreated'),
-    });
-
     setInput('');
 
     // Debug: check if electron API exists

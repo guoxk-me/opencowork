@@ -87,6 +87,8 @@ export const RENDERER_CHANNELS = {
   TASK_PLAN_UPDATE: 'task:planUpdate',
   TASK_TAKEOVER_REQUEST: 'task:takeoverRequest',
   TASK_COMPLETED: 'task:completed',
+  TASK_STREAM_TOKEN: 'task:streamToken',
+  TASK_STREAM_END: 'task:streamEnd',
   ASK_USER_REQUEST: 'ask:user:request',
   ASK_USER_RESPONSE: 'ask:user:response',
 } as const;

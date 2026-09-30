@@ -1323,6 +1323,7 @@ export class MainAgent {
     this.model = new ChatOpenAI({
       model: this.config.modelName || llmConfig.model || 'gpt-4-turbo',
       temperature: this.config.temperature ?? 0,
+      streaming: true,
       apiKey: llmConfig.apiKey,
       configuration: {
         baseURL: llmConfig.baseUrl,
@@ -1724,18 +1725,81 @@ export class MainAgent {
 
       const startTime = Date.now();
       const TASK_TIMEOUT_MS = 300000; // 5 minutes
+      const streamAbortController = new AbortController();
+      let activeStream: { cancel?: (reason?: any) => Promise<void> | void } | null = null;
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-      const invokePromise = this.agent.invoke(
-        { messages: [{ role: 'user', content: task }] },
-        { configurable: { thread_id: this.threadId } }
-      );
+      const runPromise = this.checkpointerEnabled
+        ? (async () => {
+            const stream = await this.agent.stream(
+              { messages: [{ role: 'user', content: task }] },
+              {
+                configurable: { thread_id: this.threadId },
+                streamMode: 'messages',
+                signal: streamAbortController.signal,
+              }
+            );
+            activeStream = stream;
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Task timeout after 5 minutes')), TASK_TIMEOUT_MS)
-      );
+            for await (const chunk of stream) {
+              if (this.cancelRequested) {
+                const cancelError = new Error('Task cancelled');
+                streamAbortController.abort(cancelError);
+                void activeStream?.cancel?.(cancelError);
+                break;
+              }
 
-      this.currentRunPromise = Promise.race([invokePromise, timeoutPromise]) as Promise<any>;
-      const result = await this.currentRunPromise;
+              const [message] = chunk as [any, any];
+
+              if (message.constructor?.name === 'AIMessageChunk' && message.content) {
+                const tokenContent =
+                  typeof message.content === 'string'
+                    ? message.content
+                    : Array.isArray(message.content)
+                      ? message.content
+                          .filter((b: any) => b.type === 'text')
+                          .map((b: any) => b.text)
+                          .join('')
+                      : '';
+                if (tokenContent) {
+                  this.sendToRenderer('task:streamToken', {
+                    handleId: this.threadId,
+                    content: tokenContent,
+                  });
+                }
+              }
+            }
+
+            this.sendToRenderer('task:streamEnd', { handleId: this.threadId });
+
+            const state = await this.agent.getState({
+              configurable: { thread_id: this.threadId },
+            });
+            return state.values;
+          })()
+        : this.agent.invoke(
+            { messages: [{ role: 'user', content: task }] },
+            { configurable: { thread_id: this.threadId } }
+          );
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          const timeoutError = new Error('Task timeout after 5 minutes');
+          streamAbortController.abort(timeoutError);
+          void activeStream?.cancel?.(timeoutError);
+          reject(timeoutError);
+        }, TASK_TIMEOUT_MS);
+      });
+
+      this.currentRunPromise = Promise.race([runPromise, timeoutPromise]) as Promise<any>;
+      let result: any;
+      try {
+        result = await this.currentRunPromise;
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+      }
       const duration = Date.now() - startTime;
 
       if (this.cancelRequested) {

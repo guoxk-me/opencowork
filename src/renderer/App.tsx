@@ -184,6 +184,7 @@ function App() {
     }
 
     const errorMsg = event?.error?.message || event?.error || t('logs.unknownError');
+    useTaskStore.getState().resetStreamingMessage();
     setTaskError(errorMsg);
     updateTaskStatus('failed');
     setCurrentResult(null);
@@ -283,11 +284,21 @@ function App() {
           if (taskResult) {
             setCurrentResult(taskResult);
           }
-          addMessage({
-            role: 'ai',
-            content: resultText,
-            steps: finalSteps,
-          });
+          const storeSnapshot = useTaskStore.getState();
+          if (storeSnapshot.streamingMessageId) {
+            const finalContent =
+              typeof event.legacyResult?.finalMessage === 'string' &&
+              event.legacyResult.finalMessage.trim().length > 0
+                ? event.legacyResult.finalMessage
+                : resultText;
+            storeSnapshot.consumeStreamingMessage(finalSteps, finalContent);
+          } else {
+            addMessage({
+              role: 'ai',
+              content: resultText,
+              steps: finalSteps,
+            });
+          }
           clearActiveSteps();
           addLog({ type: 'success', message: t('logs.taskCompleted') });
           saveMessages(useTaskStore.getState().messages);
@@ -363,6 +374,7 @@ function App() {
             updateTaskStatus('executing');
             addLog({ type: 'info', message: event.message || t('logs.taskResumed') });
           } else if (event.status === 'cancelled') {
+            useTaskStore.getState().resetStreamingMessage();
             setTaskInterrupted(false, undefined, null);
             updateTaskStatus('cancelled');
             addLog({ type: 'info', message: t('logs.taskCancelled') });
@@ -381,6 +393,32 @@ function App() {
           addLog({ type: 'info', message: event.message || t('logs.waitingLoginPopup') });
         } catch (error) {
           console.error('[Renderer] task:waiting_login handler error:', error);
+        }
+      })
+    );
+
+    unsubscribers.push(
+      window.electron.on('task:streamToken', (event: any) => {
+        try {
+          if (!isCurrentTaskEvent(event)) return;
+          const store = useTaskStore.getState();
+          if (!store.streamingMessageId) {
+            store.beginStreamingMessage();
+          }
+          store.appendToStreamingMessage(event.content);
+        } catch (error) {
+          console.error('[Renderer] task:streamToken handler error:', error);
+        }
+      })
+    );
+
+    unsubscribers.push(
+      window.electron.on('task:streamEnd', (event: any) => {
+        try {
+          if (!isCurrentTaskEvent(event)) return;
+          useTaskStore.getState().finalizeStreamingMessage();
+        } catch (error) {
+          console.error('[Renderer] task:streamEnd handler error:', error);
         }
       })
     );

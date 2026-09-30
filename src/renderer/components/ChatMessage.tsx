@@ -40,6 +40,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       >
         <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
           {message.content}
+          {message.streaming && <span className="streaming-cursor" />}
         </p>
 
         {message.steps && message.steps.length > 0 && (

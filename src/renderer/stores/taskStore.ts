@@ -15,6 +15,7 @@ export interface Message {
   content: string;
   timestamp: number;
   steps?: AgentStep[];
+  streaming?: boolean;
 }
 
 export interface AgentStep {
@@ -159,6 +160,14 @@ interface TaskState {
   visualApprovalRequest: VisualApprovalRequest | null;
   setVisualApprovalRequest: (request: VisualApprovalRequest | null) => void;
 
+  // Streaming message
+  streamingMessageId: string | null;
+  beginStreamingMessage: () => void;
+  appendToStreamingMessage: (token: string) => void;
+  finalizeStreamingMessage: () => void;
+  resetStreamingMessage: () => void;
+  consumeStreamingMessage: (steps?: AgentStep[], finalContent?: string) => void;
+
   // Preview Mode
   previewMode: 'sidebar' | 'detached';
   setPreviewMode: (mode: 'sidebar' | 'detached') => void;
@@ -296,6 +305,59 @@ export const useTaskStore = create<TaskState>((set) => ({
 
   visualApprovalRequest: null,
   setVisualApprovalRequest: (request) => set({ visualApprovalRequest: request }),
+
+  // Streaming message
+  streamingMessageId: null,
+  beginStreamingMessage: () =>
+    set((state) => {
+      const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const newMessage: Message = {
+        id,
+        role: 'ai',
+        content: '',
+        timestamp: Date.now(),
+        streaming: true,
+      };
+      return {
+        streamingMessageId: id,
+        messages: [...state.messages.slice(-(MAX_MESSAGES - 1)), newMessage],
+      };
+    }),
+  appendToStreamingMessage: (token) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === state.streamingMessageId ? { ...m, content: m.content + token } : m
+      ),
+    })),
+  finalizeStreamingMessage: () =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === state.streamingMessageId ? { ...m, streaming: false } : m
+      ),
+    })),
+  resetStreamingMessage: () =>
+    set((state) => ({
+      streamingMessageId: null,
+      messages: state.messages.map((m) =>
+        m.id === state.streamingMessageId ? { ...m, streaming: false } : m
+      ),
+    })),
+  consumeStreamingMessage: (steps?: AgentStep[], finalContent?: string) =>
+    set((state) => {
+      if (!state.streamingMessageId) return {};
+      const normalizedFinalContent =
+        typeof finalContent === 'string' && finalContent.trim().length > 0
+          ? finalContent
+          : undefined;
+      return {
+        streamingMessageId: null,
+        messages: state.messages.map((m) =>
+          m.id === state.streamingMessageId
+            ? { ...m, content: normalizedFinalContent ?? m.content, streaming: false, steps }
+            : m
+        ),
+      };
+    }),
 
   // Preview Mode
   previewMode: 'sidebar' as const,
