@@ -1,7 +1,7 @@
 {
-  "provider": "openai",
-  "model": "gpt-5.4-mini",
+  "provider": "xiaomi-token-plan-cn",
+  "model": "mimo-v2-flash",
   "apiKey": "",
-  "baseUrl": "",
+  "baseUrl": "https://token-plan-cn.xiaomimimo.com/anthropic",
   "timeout": 60000
 }
